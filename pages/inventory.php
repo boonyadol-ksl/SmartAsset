@@ -1254,14 +1254,24 @@ $auditors = $db->fetchAll($auditorDropdownSql . " ORDER BY u.full_name", $audito
                                 <i class="fa-solid fa-camera me-1 text-primary"></i>
                                 1. ถ่ายภาพทรัพย์สิน <span class="text-muted">(≤ 2 รูป, บีบอัด 640×480)</span>
                             </label>
-                            <input type="file" class="form-control form-control-sm" id="upload-assets" accept="image/*" capture="environment" multiple>
+                            <button type="button" class="btn btn-outline-primary w-100 py-2 text-center" style="font-size:11px;" onclick="showImageSourceModal('assets')">
+                                <i class="fa-solid fa-folder-open me-1"></i> เลือกรูปภาพ
+                            </button>
+                            <!-- Hidden file inputs -->
+                            <input type="file" id="upload-assets-gallery" accept="image/*" multiple style="display:none;">
+                            <input type="file" id="upload-assets-camera" accept="image/*" capture="environment" multiple style="display:none;">
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold" style="font-size:11px;">
                                 <i class="fa-solid fa-qrcode me-1 text-purple-600"></i>
                                 2. ถ่ายสติกเกอร์ QR Code <span class="text-muted">(≤ 1 รูป)</span>
                             </label>
-                            <input type="file" class="form-control form-control-sm" id="upload-qrcodes" accept="image/*" capture="environment">
+                            <button type="button" class="btn btn-outline-info w-100 py-2 text-center" style="font-size:11px;" onclick="showImageSourceModal('qr_codes')">
+                                <i class="fa-solid fa-folder-open me-1"></i> เลือกรูปภาพ
+                            </button>
+                            <!-- Hidden file inputs -->
+                            <input type="file" id="upload-qrcodes-gallery" accept="image/*" style="display:none;">
+                            <input type="file" id="upload-qrcodes-camera" accept="image/*" capture="environment" style="display:none;">
                         </div>
                         <!-- Image Preview Zone -->
                         <div class="col-12">
@@ -1316,6 +1326,38 @@ $auditors = $db->fetchAll($auditorDropdownSql . " ORDER BY u.full_name", $audito
     </div>
 </div>
 <!-- ═══════════════════════════════════════════════════════════
+     MODAL: IMAGE SOURCE SELECTION
+═══════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="imageSourceModal" tabindex="-1" aria-hidden="true" style="z-index:1100;">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white p-3">
+                <h5 class="modal-title fs-6">
+                    <i class="fa-solid fa-image me-2"></i>
+                    <span id="imageSourceTitle">เลือกแหล่งที่มาของรูปภาพ</span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="row g-3">
+                    <div class="col-6">
+                        <button type="button" class="btn btn-outline-success w-100 py-3 rounded-lg" onclick="selectImageSource('gallery')" data-bs-dismiss="modal">
+                            <i class="fa-solid fa-images fa-2x d-block mb-2"></i>
+                            <span style="font-size:12px;">เลือกจากแกลลอรี่</span>
+                        </button>
+                    </div>
+                    <div class="col-6">
+                        <button type="button" class="btn btn-outline-danger w-100 py-3 rounded-lg" onclick="selectImageSource('camera')" data-bs-dismiss="modal">
+                            <i class="fa-solid fa-camera fa-2x d-block mb-2"></i>
+                            <span style="font-size:12px;">ถ่ายภาพโดยตรง</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ═══════════════════════════════════════════════════════════
      SCRIPTS
 ═══════════════════════════════════════════════════════════ -->
 <script src="<?= APP_URL ?>/assets/js/app.js"></script>
@@ -1334,6 +1376,7 @@ $auditors = $db->fetchAll($auditorDropdownSql . " ORDER BY u.full_name", $audito
     let qrScannerRunning = false;
     let qrScanHandled = false;
     let currentAssetId = null;
+    let currentImageType = null; // 'assets' or 'qr_codes'
     let assetsImagesList = []; // [{base64, saved}]
     let qrCodesImagesList = []; // [{base64, saved}]
     // ══════════════════════════════════════════════════════
@@ -1343,9 +1386,12 @@ $auditors = $db->fetchAll($auditorDropdownSql . " ORDER BY u.full_name", $audito
         // Bootstrap modals
         auditBsModal = new bootstrap.Modal(document.getElementById('updateAuditModal'));
         qrBsModal = new bootstrap.Modal(document.getElementById('qrScannerModal'));
-        // Upload listeners
-        document.getElementById('upload-assets').addEventListener('change', (e) => handleImageProcessing(e, 'assets', 2));
-        document.getElementById('upload-qrcodes').addEventListener('change', (e) => handleImageProcessing(e, 'qr_codes', 1));
+        imageSourceModal = new bootstrap.Modal(document.getElementById('imageSourceModal'));
+        // Upload listeners - Hidden file inputs
+        document.getElementById('upload-assets-gallery').addEventListener('change', (e) => handleImageProcessing(e, 'assets', 2));
+        document.getElementById('upload-assets-camera').addEventListener('change', (e) => handleImageProcessing(e, 'assets', 2));
+        document.getElementById('upload-qrcodes-gallery').addEventListener('change', (e) => handleImageProcessing(e, 'qr_codes', 1));
+        document.getElementById('upload-qrcodes-camera').addEventListener('change', (e) => handleImageProcessing(e, 'qr_codes', 1));
         document.getElementById('scan-qr-image-input').addEventListener('change', handleQRImageScan);
         // QR modal lifecycle
         document.getElementById('qrScannerModal').addEventListener('shown.bs.modal', () => setTimeout(startQRScanner, 300));
@@ -1380,6 +1426,28 @@ $auditors = $db->fetchAll($auditorDropdownSql . " ORDER BY u.full_name", $audito
         const initialPlant = document.getElementById('filter-plant').value;
         fetchCostCentersAjax(initialPlant, '<?= htmlspecialchars($costCenter) ?>');
     });
+    // ══════════════════════════════════════════════════════
+    //  IMAGE SOURCE SELECTION
+    // ══════════════════════════════════════════════════════
+    function showImageSourceModal(imageType) {
+        currentImageType = imageType;
+        const title = imageType === 'assets' ? 'ถ่ายภาพทรัพย์สิน' : 'ถ่ายสติกเกอร์ QR Code';
+        document.getElementById('imageSourceTitle').textContent = title;
+        imageSourceModal.show();
+    }
+    
+    function selectImageSource(source) {
+        if (!currentImageType) return;
+        
+        const inputId = currentImageType === 'assets' 
+            ? `upload-${currentImageType}-${source}` 
+            : `upload-${currentImageType}-${source}`;
+        
+        const fileInput = document.getElementById(inputId);
+        if (fileInput) {
+            fileInput.click();
+        }
+    }
     // ══════════════════════════════════════════════════════
     //  COST CENTER CASCADE
     // ══════════════════════════════════════════════════════

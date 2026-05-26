@@ -6,11 +6,49 @@ requireLogin();
 
 $db = Database::getInstance();
 
-// Stats
+// ═══ COMPANY INFO ═══
+// ดึงข้อมูลบริษัท (site) จาก sites table
+$companyInfo = $db->fetchOne("
+    SELECT s.site_code, s.site_name, s.legal_name, s.tax_id
+    FROM sites s
+    WHERE s.is_active = 1
+    LIMIT 1
+");
+$companyName = $companyInfo['site_name'] ?? 'Asset Management System';
+
+// ═══ AUDIT YEAR FILTER ═══
+// ดึงรายชื่อปีการตรวจนับจาก audit_sessions.session_year
+$auditYears = $db->fetchAll("
+    SELECT DISTINCT session_year 
+    FROM audit_sessions 
+    WHERE session_year IS NOT NULL 
+    ORDER BY session_year DESC
+");
+// ปี default: ใช้ปี session ล่าสุด หรือปีปัจจุบัน
+$selectedYear = intval($_GET['audit_year'] ?? (empty($auditYears) ? date('Y') : $auditYears[0]['session_year']));
+
+// ═══ SUMMARY STATS ═══
+// นับทรัพย์สินทั้งหมด (ไม่กรองปี เพราะเป็นข้อมูลรวม)
 $totalAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets")['c'];
 $activeAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'")['c'];
-$cancelled    = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='cancelled'")['c'];
+// นับสถานะอื่นๆ (ไม่ใช่ active): returned, not_found, inactive, repairing
+$inactiveAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status IN ('returned','not_found','inactive','repairing')")['c'];
 $totalValue   = $db->fetchOne("SELECT SUM(acquis_val) as v FROM assets WHERE status='active'")['v'] ?? 0;
+
+// ═══ MONTHLY ACQUISITION DATA (ทรัพย์สินที่ซื้อรายเดือน) ═══
+// ดึงข้อมูลทรัพย์สินที่ซื้อในแต่ละเดือน กรองตามปีการตรวจนับที่เลือก
+// ใช้ cap_date (วันที่ซื้อ) เป็นเกณฑ์ และกรองเฉพาะปี
+$monthlyData = $db->fetchAll("
+    SELECT 
+        DATE_FORMAT(cap_date, '%Y-%m') as month,
+        COUNT(*) as cnt,
+        SUM(acquis_val) as val
+    FROM assets 
+    WHERE cap_date IS NOT NULL 
+    AND YEAR(cap_date) = ?
+    GROUP BY MONTH(cap_date), YEAR(cap_date)
+    ORDER BY cap_date ASC
+", [$selectedYear]);
 
 // Inventory progress
 $session = $db->fetchOne("SELECT * FROM inventory_sessions WHERE status='open' ORDER BY id DESC LIMIT 1");
@@ -23,13 +61,16 @@ if ($session) {
     $invPct     = $invTotal > 0 ? round($invChecked / $invTotal * 100) : 0;
 }
 
-// By Status (for donut chart)
+// ═══ BY STATUS (Donut Chart) ═══
+// นับจำนวนทรัพย์สินตามสถานะ
 $statusData = $db->fetchAll("SELECT status, COUNT(*) as cnt FROM assets GROUP BY status");
 
-// By Department (top 6)
+// ═══ BY DEPARTMENT (Top 6) ═══
+// ดึง 6 แผนกที่มีทรัพย์สินมากที่สุด
 $deptData = $db->fetchAll("SELECT department_name, COUNT(*) as cnt FROM assets GROUP BY department_name ORDER BY cnt DESC LIMIT 6");
 
-// By Class
+// ═══ BY CLASS ═══
+// ดึงจำนวนทรัพย์สินตามประเภท
 $classData = $db->fetchAll("SELECT c.class_name, COUNT(a.id) as cnt FROM assets a LEFT JOIN asset_classes c ON a.class_code = c.class_code GROUP BY a.class_code ORDER BY cnt DESC");
 
 // Recent assets
@@ -92,9 +133,32 @@ foreach ($statusByPlantRaw as $r) {
     <?php include __DIR__ . '/../components/sidebar.php'; ?>
 
     <main class="main-content flex-1 p-4 sm:p-6">
+        <!-- ═══ HEADER: ชื่อบริษัท และ FILTER ═══ -->
         <div class="mb-6">
-            <h1 class="text-xl font-bold text-gray-900">Dashboard</h1>
-            <p class="text-sm text-gray-500 mt-0.5">ภาพรวมทรัพย์สินทั้งหมด</p>
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">บริษัท</p>
+                    <h1 class="text-xl font-bold text-gray-900"><?= htmlspecialchars($companyName) ?></h1>
+                    <p class="text-sm text-gray-500 mt-0.5">ภาพรวมทรัพย์สินทั้งหมด</p>
+                </div>
+                
+                <!-- AUDIT YEAR SELECTOR (มุมขวา) -->
+                <div class="flex items-end gap-3">
+                    <div>
+                        <label for="auditYearSelect" class="block text-xs font-semibold text-gray-600 mb-1.5">ปีการตรวจนับ</label>
+                        <select id="auditYearSelect" onchange="changeAuditYear(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white hover:border-gray-400 cursor-pointer">
+                            <?php foreach ($auditYears as $year): ?>
+                            <option value="<?= htmlspecialchars($year['session_year']) ?>" <?= $year['session_year'] == $selectedYear ? 'selected' : '' ?>>
+                                ปี <?= htmlspecialchars($year['session_year']) ?>
+                            </option>
+                            <?php endforeach; ?>
+                            <?php if (empty($auditYears)): ?>
+                            <option value="<?= date('Y') ?>" selected>ปี <?= date('Y') ?></option>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- ═══ Plant Tabs ═══ -->
@@ -144,13 +208,13 @@ foreach ($statusByPlantRaw as $r) {
 
             <div class="stat-card">
                 <div class="flex items-center justify-between mb-3">
-                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ยกเลิก</p>
-                    <div class="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center">
-                        <i class="fas fa-times-circle text-red-500 text-sm"></i>
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ไม่ใช้งาน/อื่นๆ</p>
+                    <div class="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
+                        <i class="fas fa-exclamation-circle text-amber-500 text-sm"></i>
                     </div>
                 </div>
-                <p class="text-2xl font-bold text-gray-900"><?= number_format($cancelled) ?></p>
-                <p class="text-xs text-red-400 mt-1">รายการ</p>
+                <p class="text-2xl font-bold text-gray-900"><?= number_format($inactiveAssets) ?></p>
+                <p class="text-xs text-amber-600 mt-1">รายการ</p>
             </div>
 
             <div class="stat-card">
@@ -187,6 +251,12 @@ foreach ($statusByPlantRaw as $r) {
             <p class="text-xs text-gray-400 mt-2">ตรวจแล้ว <?= number_format($invChecked) ?> / <?= number_format($invTotal) ?> รายการ</p>
         </div>
         <?php endif; ?>
+
+        <!-- ═══ MONTHLY ACQUISITION CHART (ทรัพย์สินที่ซื้อรายเดือน) ═══ -->
+        <div class="card p-5 mb-6">
+            <h2 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินที่ซื้อรายเดือน (ปี <?= htmlspecialchars($selectedYear) ?>)</h2>
+            <div id="chartMonthly" class="min-h-[220px]"></div>
+        </div>
 
         <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -233,25 +303,29 @@ foreach ($statusByPlantRaw as $r) {
                             <td class="text-sm font-medium text-gray-700"><?= number_format($a['acquis_val'], 2) ?></td>
                             <td>
                                 <?php
-                                $smap   = [
-                                    'active'=>'badge-active',
-                                    'returned'=>'badge-cancelled',
-                                    'not_found'=>'badge-disposed',
-                                    'inactive'=>'badge-cancelled',
-                                    'repairing'=>'badge-warning',
-
-                                ];
+                                // ─── Status label (สถานะทรัพย์สิน) ───
+                                // ใช้สีเดียวกับ Chart: Status
                                 $slabel = [
                                     'active'=>'ใช้งาน',
                                     'returned'=>'ชำรุด-ส่งคืน',
                                     'not_found'=>'ไม่พบ',
                                     'inactive'=>'ไม่ใช้งาน',
                                     'repairing'=>'ชำรุด-รอซ่อม',
-
                                 ];
-
+                                // Status color (สัดส่วนเดียวกับ statusColors ในลาด chart)
+                                $scolor = [
+                                    'active'=>'#16a34a',      // green
+                                    'returned'=>'#2563eb',    // blue
+                                    'not_found'=>'#dc2626',   // red
+                                    'inactive'=>'#9ca3af',    // gray
+                                    'repairing'=>'#f59e0b',   // amber
+                                ];
+                                $status = $a['status'] ?? 'active';
+                                $color  = $scolor[$status] ?? '#9ca3af';
                                 ?>
-                                <span class="badge <?= $smap[$a['status']] ?? 'badge-active' ?>"><?= $slabel[$a['status']] ?? $a['status'] ?></span>
+                                <span class="badge" style="background-color: <?= $color ?>; color: white; padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.8125rem; font-weight: 500;">
+                                    <?= htmlspecialchars($slabel[$status] ?? $status) ?>
+                                </span>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -481,9 +555,22 @@ new ApexCharts(document.getElementById('chartDept'), {
 }).render();
 
 // ─── Chart: Status ───────────────────────────────────────────────────────────
+// สถานะที่มีอยู่จริงในฐานข้อมูล: active, returned, not_found, inactive, repairing
 const statusRaw = <?= json_encode($statusData) ?>;
-const statusLabels = { active:'ใช้งาน', cancelled:'ยกเลิก', disposed:'จำหน่าย', transferred:'โอนย้าย' };
-const statusColors = { active:'#16a34a', cancelled:'#dc2626', disposed:'#d97706', transferred:'#2563eb' };
+const statusLabels = { 
+    active:'ใช้งาน', 
+    returned:'ชำรุด-ส่งคืน', 
+    not_found:'ไม่พบ', 
+    inactive:'ไม่ใช้งาน', 
+    repairing:'ชำรุด-รอซ่อม' 
+};
+const statusColors = { 
+    active:'#16a34a', 
+    returned:'#2563eb', 
+    not_found:'#dc2626', 
+    inactive:'#9ca3af', 
+    repairing:'#f59e0b' 
+};
 
 new ApexCharts(document.getElementById('chartStatus'), {
     chart: { type: 'donut', height: 220, fontFamily: 'IBM Plex Sans Thai, sans-serif' },
@@ -495,6 +582,72 @@ new ApexCharts(document.getElementById('chartStatus'), {
     dataLabels: { enabled: false },
     stroke: { width: 2 }
 }).render();
+
+// ═══ Chart: Monthly Acquisition (ทรัพย์สินที่ซื้อรายเดือน) ═══
+// ข้อมูลจำนวนและมูลค่าทรัพย์สินที่ซื้อในแต่ละเดือน
+// กรองตามปีการตรวจนับที่เลือก
+const monthlyRaw = <?= json_encode($monthlyData) ?>;
+const monthlyLabels = monthlyRaw.map(m => m.month); // รูปแบบ: YYYY-MM
+const monthlyCounts = monthlyRaw.map(m => parseInt(m.cnt)); // จำนวนรายการ
+const monthlyValues = monthlyRaw.map(m => parseFloat(m.val) || 0); // มูลค่ารวม (บาท)
+
+new ApexCharts(document.getElementById('chartMonthly'), {
+    chart: { 
+        type: 'area', 
+        height: 220, 
+        toolbar: { show: false }, 
+        fontFamily: 'IBM Plex Sans Thai, sans-serif',
+        sparkline: { enabled: false }
+    },
+    series: [{ 
+        name: 'จำนวนทรัพย์สิน', 
+        data: monthlyCounts 
+    }],
+    xaxis: { 
+        categories: monthlyLabels, 
+        labels: { style: { fontSize: '11px', colors: '#64748b' } },
+        tooltip: { enabled: false }
+    },
+    yaxis: {
+        labels: { style: { fontSize: '11px', colors: '#64748b' } }
+    },
+    colors: ['#2563eb'],
+    fill: { 
+        type: 'gradient', 
+        gradient: { 
+            shadeIntensity: 1, 
+            opacityFrom: 0.35, 
+            opacityTo: 0.05 
+        } 
+    },
+    stroke: { curve: 'smooth', width: 2 },
+    grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
+    dataLabels: { enabled: false },
+    tooltip: { 
+        y: { 
+            formatter: v => v + ' รายการ',
+            title: { formatter: () => '' }
+        },
+        custom: ({ series, seriesIndex, dataPointIndex, w }) => {
+            const cnt = series[0]?.[dataPointIndex] || 0;
+            const val = monthlyValues[dataPointIndex] || 0;
+            return `
+                <div class="apexcharts-tooltip-custom">
+                    <span class="text-xs font-medium">จำนวน: ${cnt} รายการ</span><br>
+                    <span class="text-xs font-medium">มูลค่า: ${new Intl.NumberFormat('th-TH').format(val)} บาท</span>
+                </div>
+            `;
+        }
+    }
+}).render();
+
+// ═══ FUNCTION: Change Audit Year ═══
+// เปลี่ยนปีการตรวจนับและ reload page พร้อม parameter
+function changeAuditYear(year) {
+    const url = new URL(window.location);
+    url.searchParams.set('audit_year', year);
+    window.location = url.toString();
+}
 </script>
 
 </body>

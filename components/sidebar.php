@@ -359,9 +359,9 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             <div class="text-[11px] text-gray-500">${deadlineText}${sub}</div>
           </div>
           <div class="flex flex-col items-end gap-1">
-            <span class="px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badgeCls}">
-              ${labelForStatus(status)}
-            </span>
+             <span class="px-2 py-0.5 whitespace-nowrap rounded-full border text-[11px] font-semibold ${badgeCls}">
+  ${labelForStatus(status)}
+</span>
             <div class="text-[11px] text-gray-600 font-semibold">
               ค้าง <span class="text-gray-900">${s.pending}</span> / ทั้งหมด ${s.assigned}
             </div>

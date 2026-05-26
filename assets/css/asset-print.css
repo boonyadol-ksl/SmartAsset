@@ -1,0 +1,287 @@
+/* --- Global & Print Setup --- */
+@page {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Sarabun", sans-serif;
+  background: #e8e8e8;
+  color: #111;
+}
+
+.print-page {
+  width: 210mm;
+  height: 297mm;
+  margin: 0 auto 10mm;
+  background: white;
+  padding: 5mm;
+  page-break-after: always;
+  overflow: hidden;
+}
+
+.print-page:last-child {
+  page-break-after: auto;
+}
+
+/* --- Header Section --- */
+.card-header {
+  background: #1a3a6b;
+  color: #fff;
+  padding: 6px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.org {
+  font-size: 8px;
+  opacity: 0.8;
+  line-height: 1;
+  padding-bottom: 2px; /* ปรับระยะห่างจากโลโก้ */
+}
+.htitle {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.header-left {
+  display: flex;
+  align-items: center; /* ดันทุกอย่างให้อยู่กึ่งกลางแนวตั้ง */
+  gap: 10px;
+  overflow: hidden;
+}
+
+.org-logo {
+  width: 50px;
+  height: 50px; /* ปรับขนาดให้พอดีกับความสูงของ 2 บรรทัด */
+  object-fit: contain;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+.org-text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* ช่วยคุมตัวอักษรให้อยู่กลางแนวตั้ง */
+}
+/* --- Body & Layout --- */
+.card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.top-section {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+}
+
+.detail-section {
+  flex: 1;
+  overflow: hidden;
+}
+
+.qr-section {
+  width: 80px;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.qr-box {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qr-label {
+  font-size: 8px;
+  line-height: 1.1;
+  color: #555;
+  word-break: break-all;
+}
+
+/* --- Info Table --- */
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.mono {
+  font-family: monospace;
+  font-weight: 700;
+}
+
+/* --- Status & Remarks --- */
+.status-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.status-active {
+  background: #d4edda;
+  color: #155724;
+  border-color: #c3e6cb;
+}
+
+.status-inactive {
+  background: #f8d7da;
+  color: #721c24;
+  border-color: #f5c6cb;
+}
+
+.status-warning {
+  background: #fff3cd;
+  color: #856404;
+  border-color: #ffeeba;
+}
+
+.remark-box {
+  padding: 0 8px 8px;
+}
+
+/* --- Photo Section --- */
+.photo-section {
+  flex: 1;
+  padding: 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.photo-grid {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
+
+.grid-1 {
+  grid-template-columns: 1fr;
+}
+
+.grid-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.grid-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.photo-item {
+  padding: 10px; /* ยิ่ง Padding มาก ภาพจะยิ่งเล็กลงและประหยัดหมึกมากขึ้น */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: white; /* ขาวสะอาดประหยัดหมึก */
+  border: 0.5px solid #ddd;
+}
+
+.photo-item img {
+  width: 350px; /* กำหนดขนาดภาพให้ใหญ่พอสำหรับการพิมพ์ แต่ไม่ใหญ่เกินไปจนเปลืองหมึก */
+  height: 350px;
+  object-fit: contain; /* ใช้ contain เพื่อให้เห็นภาพครบและไม่เปลืองหมึกพิมพ์ในส่วนที่ภาพไม่อยู่ */
+  display: block;
+}
+
+/* ปรับปรุง CSS ของ index (เพื่อความสวยงามและไม่ขัดขวางการจัดกึ่งกลาง) */
+.photo-index {
+  position: absolute; /* จัดตำแหน่งตามใจชอบ */
+  top: 4px; /* ระยะห่างจากด้านบน */
+  right: 4px; /* ระยะห่างจากด้านขวา */
+  z-index: 10; /* ตรวจสอบให้แน่ใจว่ามันทับอยู่บนรูปภาพ */
+
+  /* CSS ตกแต่งเดิม */
+  /* background: rgba(0, 0, 0, .65); */
+  color: white;
+  font-size: 8px;
+  padding: 1px 5px;
+  border-radius: 10px;
+}
+
+/* --- Footer --- */
+.card-footer {
+  border-top: 1px solid #ddd;
+  padding: 8px 8px 4px 8px; /* เว้นขอบล่างให้เซ็นชื่อได้ถนัด */
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  background: #fff;
+}
+
+.footer-date {
+  font-size: 10px;
+  color: #999;
+}
+
+.sig-row {
+  display: flex;
+  gap: 60px;
+}
+
+.sig {
+  width: 150px; /* ความกว้างช่องเซ็น */
+  border-top: 1px solid #333; /* เส้นสำหรับเซ็นชื่อ */
+  text-align: center;
+  font-size: 16px;
+  color: #333;
+  padding-top: 2px;
+}
+
+/* --- UI & Print --- */
+.no-print {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 999;
+  display: flex;
+  gap: 8px;
+}
+
+.no-print button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: none;
+  background: #1a3a6b;
+  color: white;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+@media print {
+  body {
+    background: white;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-page {
+    margin: 0;
+  }
+}

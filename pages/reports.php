@@ -6,37 +6,93 @@ requireLogin();
 
 $db = Database::getInstance();
 
+// ═══ COMPANY INFO ═══
+$companyInfo = $db->fetchOne("SELECT s.site_code, s.site_name, s.legal_name, s.tax_id FROM sites s WHERE s.is_active = 1 LIMIT 1");
+$companyName = $companyInfo['site_name'] ?? 'Asset Management System';
+
+// ═══ AUDIT YEAR FILTER ═══
+$auditYears = $db->fetchAll("SELECT DISTINCT session_year FROM audit_sessions WHERE session_year IS NOT NULL ORDER BY session_year DESC");
+$selectedYear = intval($_GET['audit_year'] ?? (empty($auditYears) ? date('Y') : $auditYears[0]['session_year']));
+$selectedSpan = max(0, min(3, intval($_GET['year_span'] ?? 0)));
+$yearStart = $selectedYear - $selectedSpan;
+$yearLabel = $selectedSpan > 0 ? sprintf('%d - %d', $yearStart, $selectedYear) : (string)$selectedYear;
+
+// ═══ PLANT FILTER ═══
+$selectedPlant = trim($_GET['plant'] ?? '');
+$plantStats = $db->fetchAll(
+    "SELECT a.plant_code, COALESCE(p.plant_name, a.plant_code) AS plant_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val " .
+    "FROM assets a LEFT JOIN plants p ON a.plant_code=p.plant_code " .
+    "WHERE a.plant_code IS NOT NULL AND a.plant_code != '' " .
+    "GROUP BY a.plant_code, p.plant_name ORDER BY a.plant_code"
+);
+
+$plantFilterSql = '';
+$plantFilterParams = [];
+if ($selectedPlant !== '') {
+    $plantFilterSql = " AND plant_code = ?";
+    $plantFilterParams[] = $selectedPlant;
+}
+
+$yearFilterSql = " AND YEAR(cap_date) BETWEEN ? AND ?";
+$yearFilterParams = [$yearStart, $selectedYear];
+$summaryFilterSql = $plantFilterSql . $yearFilterSql;
+$summaryFilterParams = array_merge($plantFilterParams, $yearFilterParams);
+
 // Summary data
-$totalAssets   = $db->fetchOne("SELECT COUNT(*) as c FROM assets")['c'];
-$activeAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'")['c'];
-$cancelled     = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='cancelled'")['c'];
-$totalValue    = $db->fetchOne("SELECT IFNULL(SUM(acquis_val),0) as v FROM assets WHERE status='active'")['v'];
+$totalAssets   = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1" . $summaryFilterSql, $summaryFilterParams)['c'];
+$activeAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'" . $summaryFilterSql, $summaryFilterParams)['c'];
+$cancelled     = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='cancelled'" . $summaryFilterSql, $summaryFilterParams)['c'];
+$totalValue    = $db->fetchOne("SELECT IFNULL(SUM(acquis_val),0) as v FROM assets WHERE status='active'" . $summaryFilterSql, $summaryFilterParams)['v'];
+
+$openInventorySession = $db->fetchOne("SELECT * FROM inventory_sessions WHERE status='open' ORDER BY id DESC LIMIT 1");
+$checkedByDept = [];
+if ($openInventorySession) {
+    $rows = $db->fetchAll(
+        "SELECT a.department_code, COUNT(DISTINCT ir.asset_id) AS checked_count " .
+        "FROM inventory_results ir " .
+        "JOIN assets a ON ir.asset_id = a.id " .
+        "WHERE ir.session_id = ? GROUP BY a.department_code",
+        [$openInventorySession['id']]
+    );
+    foreach ($rows as $row) {
+        $checkedByDept[$row['department_code']] = (int)$row['checked_count'];
+    }
+}
 
 // By Department
-$deptPage   = max(1, intval($_GET['dpage'] ?? 1));
-$deptLimit  = 10;
-$deptOffset = ($deptPage - 1) * $deptLimit;
-$deptTotal  = $db->fetchOne("SELECT COUNT(DISTINCT department_code) as c FROM assets WHERE status='active' AND department_name IS NOT NULL")['c'];
-$deptPages  = max(1, ceil($deptTotal / $deptLimit));
-$byDept = $db->fetchAll("SELECT department_code, department_name, COUNT(*) as cnt, SUM(acquis_val) as val FROM assets WHERE status='active' GROUP BY department_code, department_name ORDER BY cnt DESC LIMIT $deptLimit OFFSET $deptOffset");
+$byDept = $db->fetchAll(
+    "SELECT department_code, department_name, COUNT(*) as total, COUNT(*) as cnt, " .
+    "SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_count, " .
+    "SUM(CASE WHEN status='returned' THEN 1 ELSE 0 END) AS returned_count, " .
+    "SUM(CASE WHEN status='repairing' THEN 1 ELSE 0 END) AS repairing_count, " .
+    "SUM(CASE WHEN status='not_found' THEN 1 ELSE 0 END) AS not_found_count, " .
+    "SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) AS inactive_count, " .
+    "IFNULL(SUM(acquis_val),0) as val " .
+    "FROM assets WHERE 1=1" . $plantFilterSql . $yearFilterSql . " GROUP BY department_code, department_name ORDER BY total DESC",
+    array_merge($plantFilterParams, $yearFilterParams)
+);
 
 // By Class
 $classPage   = max(1, intval($_GET['cpage'] ?? 1));
 $classLimit  = 10;
 $classOffset = ($classPage - 1) * $classLimit;
-$classTotal  = $db->fetchOne("SELECT COUNT(DISTINCT a.class_code) as c FROM assets a WHERE a.status='active'")['c'];
+$classTotal  = $db->fetchOne("SELECT COUNT(DISTINCT a.class_code) as c FROM assets a WHERE a.status='active'" . $plantFilterSql . $yearFilterSql, array_merge($plantFilterParams, $yearFilterParams))['c'];
 $classPages  = max(1, ceil($classTotal / $classLimit));
-$byClass = $db->fetchAll("SELECT c.class_code, c.class_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val FROM assets a LEFT JOIN asset_classes c ON a.class_code=c.class_code WHERE a.status='active' GROUP BY c.class_code, c.class_name ORDER BY cnt DESC LIMIT $classLimit OFFSET $classOffset");
+$byClass = $db->fetchAll("SELECT c.class_code, c.class_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val FROM assets a LEFT JOIN asset_classes c ON a.class_code=c.class_code WHERE a.status='active'" . $plantFilterSql . $yearFilterSql . " GROUP BY c.class_code, c.class_name ORDER BY cnt DESC LIMIT $classLimit OFFSET $classOffset", array_merge($plantFilterParams, $yearFilterParams));
 
-// By Plant
-$byPlant = $db->fetchAll("SELECT a.plant_code, p.plant_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val FROM assets a LEFT JOIN plants p ON a.plant_code=p.plant_code GROUP BY a.plant_code, p.plant_name ORDER BY cnt DESC");
-
-// Monthly acquisition (last 12 months)
-$monthly = $db->fetchAll("
-    SELECT DATE_FORMAT(cap_date,'%Y-%m') as month, COUNT(*) as cnt, SUM(acquis_val) as val
-    FROM assets WHERE cap_date >= DATE_SUB(NOW(), INTERVAL 12 MONTH) AND cap_date IS NOT NULL
-    GROUP BY month ORDER BY month ASC
-");
+// Monthly acquisition (selected audit year)
+$monthlyWhere = "WHERE cap_date IS NOT NULL";
+$monthlyParams = [];
+if ($selectedPlant !== '') {
+    $monthlyWhere .= " AND plant_code = ?";
+    $monthlyParams[] = $selectedPlant;
+}
+$monthlyWhere .= " AND YEAR(cap_date) = ?";
+$monthlyParams[] = $selectedYear;
+$monthly = $db->fetchAll(
+    "SELECT DATE_FORMAT(cap_date,'%Y-%m') as month, COUNT(*) as cnt, SUM(acquis_val) as val FROM assets " . $monthlyWhere . " GROUP BY month ORDER BY month ASC",
+    $monthlyParams
+);
 ?>
 <?php include __DIR__ . '/../components/head.php'; ?>
 
@@ -44,19 +100,59 @@ $monthly = $db->fetchAll("
     <?php include __DIR__ . '/../components/sidebar.php'; ?>
 
     <main class="main-content flex-1 p-4 sm:p-6">
-        <div class="flex items-center justify-between mb-5">
-            <div>
-                <h1 class="text-xl font-bold text-gray-900">รายงาน & Export</h1>
-                <p class="text-sm text-gray-500 mt-0.5">สรุปข้อมูลทรัพย์สินและการตรวจนับ</p>
+        <div class="mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">บริษัท</p>
+                    <h1 class="text-xl font-bold text-gray-900"><?= htmlspecialchars($companyName) ?></h1>
+                    <p class="text-sm text-gray-500 mt-0.5">รายงานทรัพย์สินและการตรวจนับ</p>
+                </div>
+                <div class="flex items-end gap-3">
+                    <a href="<?= APP_URL ?>/api/export.php?type=assets&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-file-csv text-green-600"></i> Export CSV
+                    </a>
+                    <button onclick="printPage()" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-print text-blue-600"></i> พิมพ์
+                    </button>
+                    <div>
+                        <label for="auditYearSelect" class="block text-xs font-semibold text-gray-600 mb-1.5">ปีการตรวจนับ</label>
+                        <select id="auditYearSelect" onchange="changeAuditYear(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white hover:border-gray-400 cursor-pointer">
+                            <?php foreach ($auditYears as $year): ?>
+                            <option value="<?= htmlspecialchars($year['session_year']) ?>" <?= $year['session_year'] == $selectedYear ? 'selected' : '' ?>>
+                                ปี <?= htmlspecialchars($year['session_year']) ?>
+                            </option>
+                            <?php endforeach; ?>
+                            <?php if (empty($auditYears)): ?>
+                            <option value="<?= date('Y') ?>" selected>ปี <?= date('Y') ?></option>
+                            <?php endif; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="yearSpanSelect" class="block text-xs font-semibold text-gray-600 mb-1.5">ย้อนหลัง</label>
+                        <select id="yearSpanSelect" onchange="changeYearSpan(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-900 bg-white hover:border-gray-400 cursor-pointer">
+                            <?php for ($span = 0; $span <= 3; $span++): ?>
+                            <option value="<?= $span ?>" <?= $span === $selectedSpan ? 'selected' : '' ?>>
+                                <?= $span === 0 ? 'ปีปัจจุบัน' : 'ย้อนหลัง ' . $span . ' ปี' ?>
+                            </option>
+                            <?php endfor; ?>
+                        </select>
+                    </div>
+                </div>
             </div>
-            <div class="flex gap-2">
-                <a href="<?= APP_URL ?>/api/export.php?type=assets&format=csv" class="btn btn-secondary btn-sm">
-                    <i class="fas fa-file-csv text-green-600"></i> Export CSV
-                </a>
-                <button onclick="printPage()" class="btn btn-secondary btn-sm">
-                    <i class="fas fa-print text-blue-600"></i> พิมพ์
+        </div>
+
+        <div class="mb-5 border-b border-gray-200">
+            <nav class="flex overflow-x-auto gap-0.5 -mb-px no-scrollbar">
+                <button onclick="changePlantFilter('')" id="tab-all" class="plant-tab flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors <?= $selectedPlant === '' ? 'border-blue-600 text-blue-700 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' ?>">
+                    <i class="fas fa-globe mr-1"></i> ทั้งหมด
                 </button>
-            </div>
+                <?php foreach ($plantStats as $ps): ?>
+                <button onclick="changePlantFilter('<?= htmlspecialchars($ps['plant_code'], ENT_QUOTES) ?>')" id="tab-<?= htmlspecialchars($ps['plant_code'], ENT_QUOTES) ?>" class="plant-tab flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors <?= $selectedPlant === $ps['plant_code'] ? 'border-blue-600 text-blue-700 bg-blue-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' ?>">
+                    <?= htmlspecialchars($ps['plant_code']) ?>
+                    <span class="ml-1 text-[10px] text-gray-400">(<?= number_format($ps['cnt']) ?>)</span>
+                </button>
+                <?php endforeach; ?>
+            </nav>
         </div>
 
         <!-- Summary Stats -->
@@ -94,71 +190,73 @@ $monthly = $db->fetchAll("
 
         <!-- Monthly Chart -->
         <div class="card p-5 mb-5">
-            <h3 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินที่ซื้อรายเดือน (12 เดือนล่าสุด)</h3>
+            <h3 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินที่ซื้อรายเดือน (ช่วงปี <?= htmlspecialchars($yearLabel) ?>)</h3>
             <div id="chartMonthly" class="min-h-[220px]"></div>
         </div>
 
         <!-- Table by Department -->
         <div class="card mb-5">
             <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h3 class="font-bold text-gray-900 text-sm">รายงานตามแผนก</h3>
+                <div>
+                    <h3 class="font-bold text-gray-900 text-sm">รายงานตามแผนก</h3>
+                    <p class="text-xs text-gray-500 mt-1">ช่วงปี <?= htmlspecialchars($yearLabel) ?><?= $selectedPlant ? ' | Plant: ' . htmlspecialchars($selectedPlant) : '' ?></p>
+                </div>
+                <?php if ($openInventorySession): ?>
+                <span class="text-xs text-gray-500">รอบตรวจนับเปิดอยู่: <?= htmlspecialchars($openInventorySession['session_name']) ?></span>
+                <?php endif; ?>
             </div>
             <div class="table-wrap">
                 <table class="data-table" id="deptTable">
                     <thead>
                         <tr>
-                            <th>#</th>
-                            <th>แผนก</th>
-                            <th class="text-right">จำนวน (รายการ)</th>
-                            <th class="text-right">มูลค่ารวม (บาท)</th>
-                            <th class="text-right">สัดส่วน</th>
+                            <th rowspan="2">แผนก</th>
+                            <th rowspan="2">จำนวนทรัพย์สิน</th>
+                            <th colspan="5">ตรวจนับ</th>
+                            <th rowspan="2">มูลค่า</th>
+                            <th rowspan="2">% การตรวจนับ</th>
+                        </tr>
+                        <tr>
+                            <th>ใช้งาน</th>
+                            <th>ส่งคืน</th>
+                            <th>รอซ่อม</th>
+                            <th>ไม่พบ</th>
+                            <th>ไม่ใช้งาน</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($byDept as $i => $d): ?>
+                        <?php foreach ($byDept as $d): ?>
+                        <?php $checked = $checkedByDept[$d['department_code'] ?? ''] ?? 0; ?>
+                        <?php $pct = $d['total'] > 0 ? round($checked / $d['total'] * 100, 1) : 0; ?>
                         <tr>
-                            <td class="text-gray-400 text-xs"><?= $i+1 ?></td>
-                            <td class="font-medium text-gray-900"><?= htmlspecialchars($d['department_name'] ?? '-') ?></td>
-                            <td class="text-right font-medium"><?= number_format($d['cnt']) ?></td>
-                            <td class="text-right"><?= number_format($d['val'], 2) ?></td>
+                            <td class="font-medium text-gray-900 text-left"><?= htmlspecialchars($d['department_name'] ?? '(ไม่ระบุ)') ?></td>
+                            <td class="text-right font-semibold"><?= number_format($d['total']) ?></td>
+                            <td class="text-right text-green-700 font-medium"><?= number_format($d['active_count']) ?></td>
+                            <td class="text-right text-blue-700 font-medium"><?= number_format($d['returned_count']) ?></td>
+                            <td class="text-right text-amber-600 font-medium"><?= number_format($d['repairing_count']) ?></td>
+                            <td class="text-right text-red-600 font-medium"><?= number_format($d['not_found_count']) ?></td>
+                            <td class="text-right text-gray-500 font-medium"><?= number_format($d['inactive_count']) ?></td>
                             <td class="text-right">
-                                <?php $pct = $activeAssets > 0 ? round($d['cnt']/$activeAssets*100, 1) : 0; ?>
-                                <div class="flex items-center justify-end gap-2">
-                                    <div class="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                        <div class="h-1.5 bg-blue-500 rounded-full" style="width:<?= $pct ?>%"></div>
-                                    </div>
-                                    <span class="text-xs text-gray-500 w-8 text-right"><?= $pct ?>%</span>
-                                </div>
+                                <?= number_format($d['val'], 2) ?>
                             </td>
+                            <td class="text-right font-semibold"><?= $openInventorySession ? $pct . '%' : '-' ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                     <tfoot>
                         <tr class="bg-gray-50 font-bold">
-                            <td colspan="2" class="px-4 py-3 text-sm">รวมทั้งหมด</td>
-                            <td class="px-4 py-3 text-right text-sm"><?= number_format($activeAssets) ?></td>
-                            <td class="px-4 py-3 text-right text-sm"><?= number_format($totalValue, 2) ?></td>
-                            <td></td>
+                            <td class="px-4 py-3 text-sm">รวมทั้งหมด</td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'total'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'active_count'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'returned_count'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'repairing_count'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'not_found_count'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'inactive_count'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'val')), 2) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"></td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
-            <?php if ($deptPages > 1): ?>
-            <div class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
-                <p class="text-xs text-gray-500"><?= $deptOffset + 1 ?>–<?= min($deptOffset + $deptLimit, $deptTotal) ?> / <?= $deptTotal ?></p>
-                <div class="pagination">
-                    <?php if ($deptPage > 1): ?>
-                    <a href="?<?= http_build_query(array_merge($_GET, ['dpage' => $deptPage - 1])) ?>" class="page-btn">‹</a>
-                    <?php endif; ?>
-                    <?php for ($p = max(1, $deptPage - 2); $p <= min($deptPages, $deptPage + 2); $p++): ?>
-                    <a href="?<?= http_build_query(array_merge($_GET, ['dpage' => $p])) ?>" class="page-btn <?= $p === $deptPage ? 'active' : '' ?>"><?= $p ?></a>
-                    <?php endfor; ?>
-                    <?php if ($deptPage < $deptPages): ?>
-                    <a href="?<?= http_build_query(array_merge($_GET, ['dpage' => $deptPage + 1])) ?>" class="page-btn">›</a>
-                    <?php endif; ?>
-                </div>
-            </div>
-            <?php endif; ?>
         </div>
 
         <!-- Table by Class -->
@@ -249,6 +347,28 @@ new ApexCharts(document.getElementById('chartMonthly'), {
     dataLabels: { enabled: false },
     tooltip: { y: { formatter: v => v + ' รายการ' } },
 }).render();
+
+function changeAuditYear(year) {
+    const url = new URL(window.location);
+    url.searchParams.set('audit_year', year);
+    window.location = url.toString();
+}
+
+function changeYearSpan(span) {
+    const url = new URL(window.location);
+    url.searchParams.set('year_span', span);
+    window.location = url.toString();
+}
+
+function changePlantFilter(plantCode) {
+    const url = new URL(window.location);
+    if (plantCode === '') {
+        url.searchParams.delete('plant');
+    } else {
+        url.searchParams.set('plant', plantCode);
+    }
+    window.location = url.toString();
+}
 </script>
 
 </body>

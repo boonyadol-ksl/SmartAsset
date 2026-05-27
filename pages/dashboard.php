@@ -50,14 +50,14 @@ $monthlyData = $db->fetchAll("
     ORDER BY cap_date ASC
 ", [$selectedYear]);
 
-// Inventory progress
-$session = $db->fetchOne("SELECT * FROM inventory_sessions WHERE status='open' ORDER BY id DESC LIMIT 1");
+// Inventory progress (audit session progress)
+$session = $db->fetchOne("SELECT * FROM audit_sessions ORDER BY id DESC LIMIT 1");
 $invTotal    = 0;
 $invChecked  = 0;
 $invPct      = 0;
 if ($session) {
-    $invTotal   = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'")['c'];
-    $invChecked = $db->fetchOne("SELECT COUNT(DISTINCT asset_id) as c FROM inventory_results WHERE session_id=?", [$session['id']])['c'];
+    $invTotal   = $db->fetchOne("SELECT COUNT(DISTINCT asset_id) as c FROM audit_assignments WHERE session_id = ?", [$session['id']])['c'];
+    $invChecked = $db->fetchOne("SELECT COUNT(DISTINCT asset_id) as c FROM audit_assignments WHERE session_id = ? AND status = 'completed'", [$session['id']])['c'];
     $invPct     = $invTotal > 0 ? round($invChecked / $invTotal * 100) : 0;
 }
 

@@ -44,15 +44,15 @@ $activeAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='a
 $cancelled     = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='cancelled'" . $summaryFilterSql, $summaryFilterParams)['c'];
 $totalValue    = $db->fetchOne("SELECT IFNULL(SUM(acquis_val),0) as v FROM assets WHERE status='active'" . $summaryFilterSql, $summaryFilterParams)['v'];
 
-$openInventorySession = $db->fetchOne("SELECT * FROM inventory_sessions WHERE status='open' ORDER BY id DESC LIMIT 1");
+$openAuditSession = $db->fetchOne("SELECT * FROM audit_sessions ORDER BY id DESC LIMIT 1");
 $checkedByDept = [];
-if ($openInventorySession) {
+if ($openAuditSession) {
     $rows = $db->fetchAll(
-        "SELECT a.department_code, COUNT(DISTINCT ir.asset_id) AS checked_count " .
-        "FROM inventory_results ir " .
-        "JOIN assets a ON ir.asset_id = a.id " .
-        "WHERE ir.session_id = ? GROUP BY a.department_code",
-        [$openInventorySession['id']]
+        "SELECT a.department_code, COUNT(DISTINCT aa.asset_id) AS checked_count " .
+        "FROM audit_assignments aa " .
+        "JOIN assets a ON aa.asset_id = a.id " .
+        "WHERE aa.session_id = ? AND aa.status = 'completed' GROUP BY a.department_code",
+        [$openAuditSession['id']]
     );
     foreach ($rows as $row) {
         $checkedByDept[$row['department_code']] = (int)$row['checked_count'];
@@ -61,14 +61,26 @@ if ($openInventorySession) {
 
 // By Department
 $byDept = $db->fetchAll(
-    "SELECT department_code, department_name, COUNT(*) as total, COUNT(*) as cnt, " .
-    "SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_count, " .
-    "SUM(CASE WHEN status='returned' THEN 1 ELSE 0 END) AS returned_count, " .
-    "SUM(CASE WHEN status='repairing' THEN 1 ELSE 0 END) AS repairing_count, " .
-    "SUM(CASE WHEN status='not_found' THEN 1 ELSE 0 END) AS not_found_count, " .
-    "SUM(CASE WHEN status='inactive' THEN 1 ELSE 0 END) AS inactive_count, " .
-    "IFNULL(SUM(acquis_val),0) as val " .
-    "FROM assets WHERE 1=1" . $plantFilterSql . $yearFilterSql . " GROUP BY department_code, department_name ORDER BY total DESC",
+    "SELECT a.department_code, a.department_name, COUNT(*) as total, COUNT(*) as cnt, " .
+    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"active\"%' THEN 1 ELSE 0 END) AS active_count, " .
+    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"returned\"%' THEN 1 ELSE 0 END) AS returned_count, " .
+    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"repairing\"%' THEN 1 ELSE 0 END) AS repairing_count, " .
+    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"not_found\"%' THEN 1 ELSE 0 END) AS not_found_count, " .
+    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"inactive\"%' THEN 1 ELSE 0 END) AS inactive_count, " .
+    "IFNULL(SUM(a.acquis_val),0) as val " .
+    "FROM assets a " .
+    "LEFT JOIN (" .
+    "    SELECT aa1.asset_id, aa1.remark " .
+    "    FROM audit_assignments aa1 " .
+    "    WHERE aa1.status = 'completed' " .
+    "      AND aa1.id = (" .
+    "          SELECT MAX(aa2.id) " .
+    "          FROM audit_assignments aa2 " .
+    "          WHERE aa2.asset_id = aa1.asset_id " .
+    "            AND aa2.status = 'completed'" .
+    "      )" .
+    ") aa ON aa.asset_id = a.id " .
+    "WHERE 1=1" . $plantFilterSql . $yearFilterSql . " GROUP BY a.department_code, a.department_name ORDER BY total DESC",
     array_merge($plantFilterParams, $yearFilterParams)
 );
 
@@ -107,9 +119,21 @@ $monthly = $db->fetchAll(
                     <h1 class="text-xl font-bold text-gray-900"><?= htmlspecialchars($companyName) ?></h1>
                     <p class="text-sm text-gray-500 mt-0.5">รายงานทรัพย์สินและการตรวจนับ</p>
                 </div>
-                <div class="flex items-end gap-3">
+                <div class="flex items-end gap-3 flex-wrap">
                     <a href="<?= APP_URL ?>/api/export.php?type=assets&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
-                        <i class="fas fa-file-csv text-green-600"></i> Export CSV
+                        <i class="fas fa-file-csv text-green-600"></i> Export Assets
+                    </a>
+                    <a href="<?= APP_URL ?>/api/export.php?type=report&section=dept&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-file-csv text-green-600"></i> Export Dept
+                    </a>
+                    <a href="<?= APP_URL ?>/api/export.php?type=report&section=class&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-file-csv text-green-600"></i> Export Class
+                    </a>
+                    <a href="<?= APP_URL ?>/api/export.php?type=report&section=monthly&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-file-csv text-green-600"></i> Export Monthly
+                    </a>
+                    <a href="<?= APP_URL ?>/api/export.php?type=report&section=all&format=csv<?= $selectedPlant ? '&plant=' . urlencode($selectedPlant) : '' ?><?= '&audit_year=' . urlencode($selectedYear) . '&year_span=' . urlencode($selectedSpan) ?>" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-file-csv text-green-600"></i> Export All Summary
                     </a>
                     <button onclick="printPage()" class="btn btn-secondary btn-sm">
                         <i class="fas fa-print text-blue-600"></i> พิมพ์
@@ -201,8 +225,8 @@ $monthly = $db->fetchAll(
                     <h3 class="font-bold text-gray-900 text-sm">รายงานตามแผนก</h3>
                     <p class="text-xs text-gray-500 mt-1">ช่วงปี <?= htmlspecialchars($yearLabel) ?><?= $selectedPlant ? ' | Plant: ' . htmlspecialchars($selectedPlant) : '' ?></p>
                 </div>
-                <?php if ($openInventorySession): ?>
-                <span class="text-xs text-gray-500">รอบตรวจนับเปิดอยู่: <?= htmlspecialchars($openInventorySession['session_name']) ?></span>
+                <?php if ($openAuditSession): ?>
+                <span class="text-xs text-gray-500">รอบตรวจนับล่าสุด: <?= htmlspecialchars($openAuditSession['session_name']) ?></span>
                 <?php endif; ?>
             </div>
             <div class="table-wrap">
@@ -238,7 +262,7 @@ $monthly = $db->fetchAll(
                             <td class="text-right">
                                 <?= number_format($d['val'], 2) ?>
                             </td>
-                            <td class="text-right font-semibold"><?= $openInventorySession ? $pct . '%' : '-' ?></td>
+                            <td class="text-right font-semibold"><?= $openAuditSession ? $pct . '%' : '-' ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

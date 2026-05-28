@@ -4,7 +4,10 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../helper/auth.php';
 requireLogin();
 
-$db = Database::getInstance();
+ $db = Database::getInstance();
+// user/site context
+$user = currentUser();
+$selectedSite = trim($_GET['site'] ?? ($user['site_code'] ?? ''));
 
 // ═══ COMPANY INFO ═══
 $companyInfo = $db->fetchOne("
@@ -30,6 +33,13 @@ $recentOffset = ($recentPage - 1) * $recentLimit;
 
 $dashYearFilterSql = " AND s.session_year = ? ";
 $dashYearParams = [$selectedYear];
+// site filter for dashboard queries (apply when a.site_code is available)
+$dashSiteFilterSql = '';
+$dashSiteParams = [];
+if ($selectedSite !== '') {
+    $dashSiteFilterSql = " AND a.site_code = ?";
+    $dashSiteParams = [$selectedSite];
+}
 
 $cacheDir = sys_get_temp_dir() . '/smartasset_dashboard';
 if (!is_dir($cacheDir)) {
@@ -51,50 +61,58 @@ if (is_file($cacheFile) && (time() - filemtime($cacheFile) < $cacheTtl)) {
 if (! $cacheLoaded) {
 // ═══ 📊 LOGIC ตรวจสอบยอดต่าง ASSETS กับ AUDIT ASSIGNMENT (เพิ่มเข้ามาใหม่) ═══
 // 1. นับจำนวนทรัพย์สินทั้งหมดที่มีอยู่ใน Master Data ปัจจุบัน (ที่มีสถานะ Active)
-$masterTotalAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1")['c']; // status = 'active'
+$masterTotalAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1" . ($selectedSite ? " AND site_code = '" . addslashes($selectedSite) . "'" : ""))['c']; // status = 'active'
 
 // 2. นับจำนวนทรัพย์สินที่ถูกนำเข้าสู่รอบตรวจนับของปีปัจจุบันแล้ว
-$assignedInSession = $db->fetchOne("
-    SELECT COUNT(DISTINCT aa.asset_id) as c
+$assignedInSession = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
-    WHERE s.session_year = ?
-", [$selectedYear])['c'];
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE s.session_year = ?" . ($selectedSite ? " AND a.site_code = '" . addslashes($selectedSite) . "'" : ""),
+    array_merge([$selectedYear], $dashSiteParams)
+)['c'];
 
 // 3. คำนวณส่วนต่าง (จำนวนทรัพย์สินใหม่ที่ยังไม่ถูกมอบหมายงานตรวจนับ)
 $missingAssetCount = max(0, $masterTotalAssets - $assignedInSession);
 
 
 // ═══ SUMMARY STATS (สถิติตามรอบตรวจนับปีนี้) ═══
-$totalAssets  = $db->fetchOne("
-    SELECT COUNT(DISTINCT aa.asset_id) as c
+$totalAssets  = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
-    WHERE 1=1" . $dashYearFilterSql, $dashYearParams)['c'];
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE 1=1" . $dashYearFilterSql . $dashSiteFilterSql,
+    array_merge($dashYearParams, $dashSiteParams)
+)
+['c'];
 
-$activeAssets = $db->fetchOne("
-    SELECT COUNT(DISTINCT aa.asset_id) as c
+$activeAssets = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
-    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql, $dashYearParams)['c'];
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql . $dashSiteFilterSql, array_merge($dashYearParams, $dashSiteParams))['c'];
 
-$inactiveAssets = $db->fetchOne("
-    SELECT COUNT(DISTINCT aa.asset_id) as c
+$inactiveAssets = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
     WHERE aa.status='completed' AND (
         IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' OR
         IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"not_found\"%' OR
         IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' OR
         IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%'
-    )" . $dashYearFilterSql, $dashYearParams)['c'];
+    )" . $dashYearFilterSql . $dashSiteFilterSql, array_merge($dashYearParams, $dashSiteParams))['c'];
 
-$totalValue   = $db->fetchOne("
-    SELECT SUM(a.acquis_val) as v
+$totalValue   = $db->fetchOne(
+    "SELECT SUM(a.acquis_val) as v
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
     INNER JOIN assets a ON aa.asset_id = a.id
-    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql, $dashYearParams)['v'] ?? 0;
+    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql . $dashSiteFilterSql, array_merge($dashYearParams, $dashSiteParams))['v'] ?? 0;
 
 // ═══ MONTHLY ACQUISITION DATA ═══
 $monthlyData = $db->fetchAll("
@@ -134,7 +152,8 @@ $statusCountsRaw = $db->fetchAll("
         COUNT(DISTINCT aa.asset_id) as cnt
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
-    WHERE aa.status = 'completed'" . $dashYearFilterSql . "
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE aa.status = 'completed'" . $dashYearFilterSql . $dashSiteFilterSql . "
     GROUP BY status_key
 ", $dashYearParams);
 
@@ -146,44 +165,45 @@ foreach ($statusCountsRaw as $r) {
 }
 
 // ═══ BY DEPARTMENT ═══
-$deptData = $db->fetchAll("
-    SELECT a.department_name, COUNT(DISTINCT aa.asset_id) as cnt
+$deptData = $db->fetchAll(
+    "SELECT a.department_name, COUNT(DISTINCT aa.asset_id) as cnt
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
     INNER JOIN assets a ON aa.asset_id = a.id
-    WHERE 1=1" . $dashYearFilterSql . "
+    WHERE 1=1" . $dashYearFilterSql . $dashSiteFilterSql . "
     GROUP BY a.department_name
     ORDER BY cnt DESC LIMIT 6
-", $dashYearParams);
+", array_merge($dashYearParams, $dashSiteParams));
 
 // ═══ BY CLASS ═══
-$classData = $db->fetchAll("
-    SELECT c.class_name, COUNT(DISTINCT aa.asset_id) as cnt
+$classData = $db->fetchAll(
+    "SELECT c.class_name, COUNT(DISTINCT aa.asset_id) as cnt
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
     INNER JOIN assets a ON aa.asset_id = a.id
     LEFT JOIN asset_classes c ON a.class_code = c.class_code
-    WHERE 1=1" . $dashYearFilterSql . "
+    WHERE 1=1" . $dashYearFilterSql . $dashSiteFilterSql . "
     GROUP BY a.class_code
     ORDER BY cnt DESC
-", $dashYearParams);
+", array_merge($dashYearParams, $dashSiteParams));
 
 // Recent assets
-$recentTotal = $db->fetchOne("
-    SELECT COUNT(DISTINCT aa.asset_id) as c
+$recentTotal = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
-    WHERE 1=1" . $dashYearFilterSql, $dashYearParams)['c'];
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE 1=1" . $dashYearFilterSql . $dashSiteFilterSql, array_merge($dashYearParams, $dashSiteParams))['c'];
 
 $recentPages = max(1, ceil($recentTotal / $recentLimit));
 
-$recentAssets = $db->fetchAll("
-    SELECT a.* FROM audit_assignments aa
+$recentAssets = $db->fetchAll(
+    "SELECT a.* FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
     INNER JOIN assets a ON aa.asset_id = a.id
-    WHERE 1=1" . $dashYearFilterSql . "
+    WHERE 1=1" . $dashYearFilterSql . $dashSiteFilterSql . "
     ORDER BY aa.id DESC LIMIT $recentLimit OFFSET $recentOffset
-", $dashYearParams);
+", array_merge($dashYearParams, $dashSiteParams));
 
 // ── Plant tab data ──
 $plantStats = $db->fetchAll("
@@ -199,10 +219,10 @@ $plantStats = $db->fetchAll("
     LEFT JOIN audit_assignments aa ON aa.asset_id = a.id
     LEFT JOIN audit_sessions s ON aa.session_id = s.id AND s.session_year = ?
     LEFT JOIN plants p ON a.plant_code = p.plant_code
-    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashSiteFilterSql . "
     GROUP BY a.plant_code, p.plant_name
     ORDER BY a.plant_code
-", $dashYearParams);
+", array_merge($dashYearParams, $dashSiteParams));
 
 $ccRaw = $db->fetchAll(" 
     SELECT a.plant_code, a.cost_center,
@@ -214,10 +234,10 @@ $ccRaw = $db->fetchAll("
     FROM audit_assignments aa
     INNER JOIN audit_sessions s ON aa.session_id = s.id
     INNER JOIN assets a ON aa.asset_id = a.id
-    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . "
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . $dashSiteFilterSql . "
     GROUP BY a.plant_code, a.cost_center
     ORDER BY a.plant_code, total DESC
-", $dashYearParams);
+", array_merge($dashYearParams, $dashSiteParams));
 $ccByPlant = [];
 foreach ($ccRaw as $cc) {
     $ccByPlant[$cc['plant_code']][] = $cc;

@@ -11,6 +11,7 @@ if (!isLoggedIn()) {
 $db     = Database::getInstance();
 $user   = currentUser();
 $method = $_SERVER['REQUEST_METHOD'];
+$userSiteCode = isset($user['site_code']) ? $user['site_code'] : null;
 
 // Parse input
 $input  = [];
@@ -27,7 +28,17 @@ $action = $input['action'] ?? ($_GET['action'] ?? '');
 if ($method === 'GET' && isset($_GET['asset_no'])) {
     $assetNo = trim($_GET['asset_no']);
     // ค้นหาแบบระบุเลขตรงๆ เพื่อความแม่นยำ
-    $asset = $db->fetchAll("SELECT * FROM assets WHERE asset_no = ?", [$assetNo]);
+    $params = [$assetNo];
+    $sql = "SELECT * FROM assets WHERE asset_no = ?";
+    // If user has a site_code (webadmin), restrict to that site. Admins may pass site_code param to query across sites.
+    if (!empty($userSiteCode)) {
+        $sql .= " AND site_code = ?";
+        $params[] = $userSiteCode;
+    } elseif (!empty($_GET['site_code'])) {
+        $sql .= " AND site_code = ?";
+        $params[] = trim($_GET['site_code']);
+    }
+    $asset = $db->fetchAll($sql, $params);
 
     if (!$asset) {
         jsonResponse(false, null, 'ไม่พบรหัสทรัพย์สินนี้', 404);
@@ -39,23 +50,19 @@ if ($method === 'GET' && isset($_GET['asset_no'])) {
 // ─── Get Cost Centers ───────────────────────────────────────────────────────────
 if ($action === 'get_cost_centers') {
     $plantCode = trim($_GET['plant_code'] ?? '');
+    $siteCode = trim($_GET['site_code'] ?? $userSiteCode);
 
+    $params = [];
+    $where = "WHERE cost_center IS NOT NULL AND cost_center != ''";
     if ($plantCode) {
-        $costCenters = $db->fetchAll(
-            "SELECT DISTINCT cost_center
-             FROM assets
-             WHERE plant_code = ? AND cost_center IS NOT NULL AND cost_center != ''
-             ORDER BY cost_center",
-            [$plantCode]
-        );
-    } else {
-        $costCenters = $db->fetchAll(
-            "SELECT DISTINCT cost_center
-             FROM assets
-             WHERE cost_center IS NOT NULL AND cost_center != ''
-             ORDER BY cost_center"
-        );
+        $where .= " AND plant_code = ?";
+        $params[] = $plantCode;
     }
+    if (!empty($siteCode)) {
+        $where .= " AND site_code = ?";
+        $params[] = $siteCode;
+    }
+    $costCenters = $db->fetchAll("SELECT DISTINCT cost_center FROM assets $where ORDER BY cost_center", $params);
 
     jsonResponse(true, $costCenters, 'Success');
 }
@@ -64,6 +71,7 @@ if ($action === 'get_cost_centers') {
 if ($action === 'get_departments') {
     $plantCode = trim($_GET['plant_code'] ?? '');
     $costCenter = trim($_GET['cost_center'] ?? '');
+    $siteCode = trim($_GET['site_code'] ?? $userSiteCode);
 
     $params = [];
     $whereClause = "department_name IS NOT NULL ";
@@ -74,6 +82,10 @@ if ($action === 'get_departments') {
     } else if ($plantCode) {
         $whereClause .= "AND plant_code = ?";
         $params = [$plantCode];
+    }
+    if (!empty($siteCode)) {
+        $whereClause .= " AND site_code = ?";
+        $params[] = $siteCode;
     }
 
     $departments = $db->fetchAll(

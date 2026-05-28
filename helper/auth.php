@@ -72,7 +72,14 @@ function currentUser()
         'role'     => isset($_SESSION['user_role']) ? $_SESSION['user_role'] : 'viewer',
         'plant'    => isset($_SESSION['user_plant']) ? $_SESSION['user_plant'] : '',
         'site_id'  => isset($_SESSION['user_site_id']) ? $_SESSION['user_site_id'] : null,
+        'site_code'=> isset($_SESSION['user_site_code']) ? $_SESSION['user_site_code'] : null,
     ];
+}
+
+function getCurrentSiteCode()
+{
+    startSession();
+    return isset($_SESSION['user_site_code']) ? $_SESSION['user_site_code'] : null;
 }
 
 function hasRole($role)

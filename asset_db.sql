@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: May 26, 2026 at 05:22 AM
+-- Generation Time: May 28, 2026 at 06:31 AM
 -- Server version: 10.1.33-MariaDB
 -- PHP Version: 7.2.6
 
@@ -180,13 +180,29 @@ CREATE TABLE `import_logs` (
   `total_rows` int(11) DEFAULT '0',
   `success_rows` int(11) DEFAULT '0',
   `error_rows` int(11) DEFAULT '0',
+  `is_rolled_back` tinyint(1) DEFAULT '0',
   `status` enum('processing','completed','failed') COLLATE utf8mb4_unicode_ci DEFAULT 'processing',
   `imported_by` int(11) DEFAULT NULL,
+  `plant_code` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `error_detail` text COLLATE utf8mb4_unicode_ci,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `skipped_rows` int(11) DEFAULT '0',
   `actual_new_records` int(11) DEFAULT '0' COMMENT 'Actual number of new records added during import'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `import_rollback_snapshots`
+--
+
+CREATE TABLE `import_rollback_snapshots` (
+  `id` int(11) NOT NULL,
+  `log_id` int(11) NOT NULL,
+  `asset_no` varchar(100) NOT NULL,
+  `old_data_json` longtext NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
 
@@ -210,15 +226,15 @@ CREATE TABLE `plants` (
 
 CREATE TABLE `sites` (
   `id` int(11) NOT NULL,
-  `site_code` varchar(10) NOT NULL,
-  `site_name` varchar(255) NOT NULL,
-  `legal_name` varchar(255) DEFAULT NULL,
-  `address` text,
-  `tax_id` varchar(50) DEFAULT NULL,
+  `site_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `site_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `legal_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `address` text COLLATE utf8mb4_unicode_ci,
+  `tax_id` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `is_active` tinyint(1) NOT NULL DEFAULT '1',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
 
@@ -240,13 +256,6 @@ CREATE TABLE `users` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
---
--- Dumping data for table `users`
---
-
-INSERT INTO `users` (`id`, `username`, `password`, `full_name`, `email`, `role`, `site_id`, `plant_code`, `is_active`, `last_login`, `created_at`, `updated_at`) VALUES
-(1, 'admin', '$2y$10$/WSw1aX2hVFtlGhMtvoq7u5ZxTDVuG1pfrD68aB3DZgR4Uz0kN2oS', 'Administrator', 'admin@company.com', 'admin', NULL, NULL, 1, '2026-05-25 18:48:42', '2026-05-11 04:43:23', '2026-05-25 11:48:42'),
 
 --
 -- Indexes for dumped tables
@@ -319,6 +328,13 @@ ALTER TABLE `departments`
 --
 ALTER TABLE `import_logs`
   ADD PRIMARY KEY (`id`);
+
+--
+-- Indexes for table `import_rollback_snapshots`
+--
+ALTER TABLE `import_rollback_snapshots`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `log_id` (`log_id`);
 
 --
 -- Indexes for table `plants`
@@ -402,6 +418,12 @@ ALTER TABLE `import_logs`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT for table `import_rollback_snapshots`
+--
+ALTER TABLE `import_rollback_snapshots`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT for table `plants`
 --
 ALTER TABLE `plants`
@@ -417,7 +439,7 @@ ALTER TABLE `sites`
 -- AUTO_INCREMENT for table `users`
 --
 ALTER TABLE `users`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=18;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
 -- Constraints for dumped tables
@@ -435,6 +457,12 @@ ALTER TABLE `audit_assignments`
 --
 ALTER TABLE `audit_summary`
   ADD CONSTRAINT `audit_summary_ibfk_1` FOREIGN KEY (`session_id`) REFERENCES `audit_sessions` (`id`) ON DELETE CASCADE;
+
+--
+-- Constraints for table `import_rollback_snapshots`
+--
+ALTER TABLE `import_rollback_snapshots`
+  ADD CONSTRAINT `import_rollback_snapshots_ibfk_1` FOREIGN KEY (`log_id`) REFERENCES `import_logs` (`id`) ON DELETE CASCADE;
 
 --
 -- Constraints for table `plants`

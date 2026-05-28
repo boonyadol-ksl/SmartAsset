@@ -6,10 +6,12 @@ requireLogin();
 
 $db = Database::getInstance();
 $user = currentUser();
+$userSiteCode = $user['site_code'] ?? null;
 
 // Filters
 $search  = trim($_GET['search'] ?? '');
 $plant   = trim($_GET['plant'] ?? '');
+$site    = trim($_GET['site'] ?? ($userSiteCode ?? ''));
 $costCenter = trim($_GET['cost_center'] ?? '');
 $dept    = trim($_GET['dept'] ?? '');
 $status  = trim($_GET['status'] ?? '');
@@ -39,6 +41,7 @@ if ($search !== '') {
     $params  = array_merge($params, ["%$search%", "%$search%", "%$search%", "%$search%"]);
 }
 if ($plant !== '') { $where[] = 'a.plant_code = ?'; $params[] = $plant; }
+if ($site !== '')  { $where[] = 'a.site_code = ?';  $params[] = $site; }
 if ($costCenter !== '') { $where[] = 'a.cost_center = ?'; $params[] = $costCenter; }
 if ($dept  !== '') { $where[] = 'a.department_code = ?'; $params[] = $dept; }
 if ($status !== '') { $where[] = 'a.status = ?'; $params[] = $status; }
@@ -51,25 +54,26 @@ $assets = $db->fetchAll("SELECT a.* FROM assets a WHERE $whereStr ORDER BY a.id 
 $totalPages = max(1, ceil($total / $limit));
 
 // Dropdowns - Load based on cascading filters
-$plants = $db->fetchAll("SELECT * FROM plants WHERE is_active=1 ORDER BY plant_code");
+$plants = $db->fetchAll("SELECT * FROM plants WHERE is_active=1" . (!empty($site) ? " AND site_id = (SELECT id FROM sites WHERE site_code = '" . addslashes($site) . "' LIMIT 1)" : "") . " ORDER BY plant_code");
 
 // Get cost centers based on selected plant
 $costCenters = [];
-if ($plant !== '') {
-    $costCenters = $db->fetchAll("SELECT DISTINCT cost_center FROM assets WHERE plant_code = ? AND cost_center IS NOT NULL AND cost_center != '' ORDER BY cost_center", [$plant]);
-} else {
-    $costCenters = $db->fetchAll("SELECT DISTINCT cost_center FROM assets WHERE cost_center IS NOT NULL AND cost_center != '' ORDER BY cost_center");
-}
+// Cost centers filtered by plant and site
+$ccParams = [];
+$ccWhere = "WHERE cost_center IS NOT NULL AND cost_center != ''";
+if ($plant !== '') { $ccWhere .= " AND plant_code = ?"; $ccParams[] = $plant; }
+if ($site !== '')  { $ccWhere .= " AND site_code = ?"; $ccParams[] = $site; }
+$costCenters = $db->fetchAll("SELECT DISTINCT cost_center FROM assets $ccWhere ORDER BY cost_center", $ccParams);
 
 // Get departments based on selected plant and cost center
 $depts = [];
-if ($plant !== '' && $costCenter !== '') {
-    $depts = $db->fetchAll("SELECT DISTINCT department_code, department_name FROM assets WHERE plant_code = ? AND cost_center = ? AND department_name IS NOT NULL ORDER BY department_name", [$plant, $costCenter]);
-} elseif ($plant !== '') {
-    $depts = $db->fetchAll("SELECT DISTINCT department_code, department_name FROM assets WHERE plant_code = ? AND department_name IS NOT NULL ORDER BY department_name", [$plant]);
-} else {
-    $depts = $db->fetchAll("SELECT DISTINCT department_code, department_name FROM assets WHERE department_name IS NOT NULL ORDER BY department_name");
-}
+// Departments filtered by plant, cost center and site
+$dParams = [];
+$dWhere = "WHERE department_name IS NOT NULL";
+if ($plant !== '' && $costCenter !== '') { $dWhere .= " AND plant_code = ? AND cost_center = ?"; $dParams = [$plant, $costCenter]; }
+elseif ($plant !== '') { $dWhere .= " AND plant_code = ?"; $dParams = [$plant]; }
+if ($site !== '') { $dWhere .= " AND site_code = ?"; $dParams[] = $site; }
+$depts = $db->fetchAll("SELECT DISTINCT department_code, department_name FROM assets $dWhere ORDER BY department_name", $dParams);
 ?>
 <?php include __DIR__ . '/../components/head.php'; ?>
 

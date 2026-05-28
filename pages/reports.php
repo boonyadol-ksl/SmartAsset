@@ -5,6 +5,8 @@ require_once __DIR__ . '/../helper/auth.php';
 requireLogin();
 
 $db = Database::getInstance();
+$user = currentUser();
+ $companyInfo = $db->fetchOne("SELECT s.site_code, s.site_name, s.legal_name, s.tax_id FROM sites s WHERE s.is_active = 1 LIMIT 1");
 
 // ═══ COMPANY INFO ═══
 $companyInfo = $db->fetchOne("SELECT s.site_code, s.site_name, s.legal_name, s.tax_id FROM sites s WHERE s.is_active = 1 LIMIT 1");
@@ -19,10 +21,13 @@ $yearLabel = $selectedSpan > 0 ? sprintf('%d - %d', $yearStart, $selectedYear) :
 
 // ═══ PLANT FILTER ═══
 $selectedPlant = trim($_GET['plant'] ?? '');
+// site filter: prefer explicit GET param, otherwise default to user's site_code
+$selectedSite = trim($_GET['site'] ?? ($user['site_code'] ?? ''));
 $plantStats = $db->fetchAll(
     "SELECT a.plant_code, COALESCE(p.plant_name, a.plant_code) AS plant_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val " .
     "FROM assets a LEFT JOIN plants p ON a.plant_code=p.plant_code " .
     "WHERE a.plant_code IS NOT NULL AND a.plant_code != '' " .
+    ($selectedSite !== '' ? " AND a.site_code = '" . addslashes($selectedSite) . "'" : "") .
     "GROUP BY a.plant_code, p.plant_name ORDER BY a.plant_code"
 );
 
@@ -34,11 +39,19 @@ if ($selectedPlant !== '') {
     $plantFilterParams[] = $selectedPlant;
 }
 
+// เตรียมเงื่อนไขสำหรับ Site
+$siteFilterSql = '';
+$siteFilterParams = [];
+if ($selectedSite !== '') {
+    $siteFilterSql = " AND a.site_code = ?";
+    $siteFilterParams[] = $selectedSite;
+}
+
 // 💡 เปลี่ยนมาใช้ s.session_year ของตารางรอบตรวจนับเป็นหลักสำหรับทุก Query ในหน้านี้
 $yearFilterSql = " AND s.session_year BETWEEN ? AND ?";
 $yearFilterParams = [$yearStart, $selectedYear];
-$summaryFilterSql = $plantFilterSql . $yearFilterSql;
-$summaryFilterParams = array_merge($plantFilterParams, $yearFilterParams);
+$summaryFilterSql = $siteFilterSql . $plantFilterSql . $yearFilterSql;
+$summaryFilterParams = array_merge($siteFilterParams, $plantFilterParams, $yearFilterParams);
 
 // ═══ Summary data (เปลี่ยนมานับความสัมพันธ์จากรอบการตรวจนับ) ═══
 $totalAssets   = $db->fetchOne(
@@ -69,19 +82,33 @@ $totalValue    = $db->fetchOne(
      INNER JOIN assets a ON aa.asset_id = a.id
      WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $summaryFilterSql, $summaryFilterParams)['v'];
 
-$openAuditSession = $db->fetchOne("SELECT * FROM audit_sessions ORDER BY id DESC LIMIT 1");
+$openAuditSessionSql = "SELECT * FROM audit_sessions" . ($selectedSite ? " WHERE site_code = '" . addslashes($selectedSite) . "'" : "") . " ORDER BY id DESC LIMIT 1";
+$openAuditSession = $db->fetchOne($openAuditSessionSql);
 $checkedByDept = [];
 if ($openAuditSession) {
     $rows = $db->fetchAll(
         "SELECT a.department_code, COUNT(DISTINCT aa.asset_id) AS checked_count " .
         "FROM audit_assignments aa " .
         "JOIN assets a ON aa.asset_id = a.id " .
-        "WHERE aa.session_id = ? AND aa.status = 'completed' GROUP BY a.department_code",
+        "WHERE aa.session_id = ? AND aa.status = 'completed'" . ($selectedSite ? " AND a.site_code = '" . addslashes($selectedSite) . "'" : "") . " GROUP BY a.department_code",
         [$openAuditSession['id']]
     );
     foreach ($rows as $row) {
         $checkedByDept[$row['department_code']] = (int)$row['checked_count'];
     }
+}
+
+// ═══ Total Master Assets by Department (ทรัพย์สินทั้งหมด - ไม่คำนึงถึง audit) ═══
+$masterAssetsByDept = [];
+$rows = $db->fetchAll(
+    "SELECT a.department_code, COUNT(DISTINCT a.id) AS master_count " .
+    "FROM assets a " .
+    "WHERE a.department_code IS NOT NULL AND a.department_code != ''" . $siteFilterSql . $plantFilterSql .
+    " GROUP BY a.department_code",
+    array_merge($siteFilterParams, $plantFilterParams)
+);
+foreach ($rows as $row) {
+    $masterAssetsByDept[$row['department_code']] = (int)$row['master_count'];
 }
 
 // ═══ Assignment counts for selected session_year range (used to compute % การตรวจนับ) ═══
@@ -95,6 +122,13 @@ if ($selectedPlant !== '') {
     $plantJoin = " AND a.plant_code = ?";
     $plantParams[] = $selectedPlant;
 }
+// site join
+$siteJoin = '';
+$siteParams = [];
+if ($selectedSite !== '') {
+    $siteJoin = " AND a.site_code = ?";
+    $siteParams[] = $selectedSite;
+}
 
 // Assigned (any status) within sessions for the selected years
 $rows = $db->fetchAll(
@@ -104,7 +138,7 @@ $rows = $db->fetchAll(
     "JOIN assets a ON aa.asset_id = a.id " .
     "WHERE s.session_year BETWEEN ? AND ?" . $plantJoin .
     " GROUP BY a.department_code",
-    array_merge($sessParams, $plantParams)
+    array_merge($sessParams, $plantParams, $siteParams)
 );
 foreach ($rows as $row) {
     $assignedByDeptYear[$row['department_code']] = (int)$row['assigned_count'];
@@ -118,15 +152,16 @@ $rows = $db->fetchAll(
     "JOIN assets a ON aa.asset_id = a.id " .
     "WHERE s.session_year BETWEEN ? AND ? AND aa.status = 'completed'" . $plantJoin .
     " GROUP BY a.department_code",
-    array_merge($sessParams, $plantParams)
+    array_merge($sessParams, $plantParams, $siteParams)
 );
 foreach ($rows as $row) {
     $completedByDeptYear[$row['department_code']] = (int)$row['completed_count'];
 }
 
 // ═══ By Department ═══
+// Get audited assets by department within the selected year(s)
 $byDept = $db->fetchAll(
-    "SELECT a.department_code, a.department_name, COUNT(DISTINCT aa.asset_id) as total, COUNT(DISTINCT aa.asset_id) as cnt, " .
+    "SELECT a.department_code, a.department_name, COUNT(DISTINCT aa.asset_id) as audited_count, " .
     "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count, " .
     "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' THEN 1 ELSE 0 END) AS returned_count, " .
     "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%' THEN 1 ELSE 0 END) AS repairing_count, " .
@@ -137,13 +172,9 @@ $byDept = $db->fetchAll(
     "INNER JOIN audit_sessions s ON aa.session_id = s.id " .
     "INNER JOIN assets a ON aa.asset_id = a.id " .
     "WHERE aa.status = 'completed' " .
-    "  AND aa.id = (" .
-    "      SELECT MAX(aa2.id) " .
-    "      FROM audit_assignments aa2 " .
-    "      WHERE aa2.asset_id = aa.asset_id " .
-    "        AND aa2.status = 'completed'" .
-    "  )" . $summaryFilterSql . " GROUP BY a.department_code, a.department_name ORDER BY total DESC",
-    $summaryFilterParams
+    "  AND s.session_year BETWEEN ? AND ?" . $plantFilterSql .
+    " GROUP BY a.department_code, a.department_name ORDER BY a.department_code",
+    array_merge([$yearStart, $selectedYear], $plantFilterParams)
 );
 
 // ═══ By Class ═══
@@ -310,10 +341,12 @@ $monthly = $db->fetchAll(
                     <thead>
                         <tr>
                             <th rowspan="2">แผนก</th>
-                            <th rowspan="2">จำนวนทรัพย์สิน</th>
+                            <th rowspan="2">ทรัพย์สินทั้งหมด</th>
+                            <th rowspan="2">ทรัพย์สินในปี</th>
                             <th colspan="5">ตรวจนับ</th>
                             <th rowspan="2">มูลค่า</th>
                             <th rowspan="2">% การตรวจนับ</th>
+                            <th rowspan="2">% หมอบหมายงาน</th>
                         </tr>
                         <tr>
                             <th>ใช้งาน</th>
@@ -325,12 +358,16 @@ $monthly = $db->fetchAll(
                     </thead>
                     <tbody>
                         <?php foreach ($byDept as $d): ?>
-                        <?php $assigned = $assignedByDeptYear[$d['department_code'] ?? ''] ?? 0; ?>
-                        <?php $completed = $completedByDeptYear[$d['department_code'] ?? ''] ?? 0; ?>
-                        <?php $pct = $assigned > 0 ? round($completed / $assigned * 100, 1) : 0; ?>
+                        <?php $deptCode = $d['department_code'] ?? ''; ?>
+                        <?php $masterCount = $masterAssetsByDept[$deptCode] ?? 0; ?>
+                        <?php $assigned = $assignedByDeptYear[$deptCode] ?? 0; ?>
+                        <?php $completed = $completedByDeptYear[$deptCode] ?? 0; ?>
+                        <?php $auditPct = $assigned > 0 ? round($completed / $assigned * 100, 1) : 0; ?>
+                        <?php $assignmentPct = $assigned > 0 ? round($masterCount / $assigned * 100, 1) : 0; ?>
                         <tr>
                             <td class="font-medium text-gray-900 text-left"><?= htmlspecialchars($d['department_name'] ?? '(ไม่ระบุ)') ?></td>
-                            <td class="text-right font-semibold"><?= number_format($d['total']) ?></td>
+                            <td class="text-right font-semibold"><?= number_format($masterCount) ?></td>
+                            <td class="text-right font-semibold"><?= number_format($d['audited_count']) ?></td>
                             <td class="text-right text-green-700 font-medium"><?= number_format($d['active_count']) ?></td>
                             <td class="text-right text-blue-700 font-medium"><?= number_format($d['returned_count']) ?></td>
                             <td class="text-right text-amber-600 font-medium"><?= number_format($d['repairing_count']) ?></td>
@@ -339,20 +376,23 @@ $monthly = $db->fetchAll(
                             <td class="text-right">
                                 <?= number_format($d['val'], 2) ?>
                             </td>
-                            <td class="text-right font-semibold"><?= $pct . '%' ?></td>
+                            <td class="text-right font-semibold"><?= $auditPct . '%' ?></td>
+                            <td class="text-right font-semibold"><?= $assignmentPct . '%' ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                     <tfoot>
                         <tr class="bg-gray-50 font-bold">
                             <td class="px-4 py-3 text-sm">รวมทั้งหมด</td>
-                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'total'))) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum($masterAssetsByDept)) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'audited_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'active_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'returned_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'repairing_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'not_found_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'inactive_count'))) ?></td>
                             <td class="px-4 py-3 text-right text-sm"><?= number_format(array_sum(array_column($byDept, 'val')), 2) ?></td>
+                            <td class="px-4 py-3 text-right text-sm"></td>
                             <td class="px-4 py-3 text-right text-sm"></td>
                         </tr>
                     </tfoot>

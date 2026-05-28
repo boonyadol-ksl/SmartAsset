@@ -15,6 +15,13 @@ requireRole(array('admin'));
 $db   = Database::getInstance();
 $user = currentUser();
 
+// Determine uploader's site_code (if user linked to a site)
+$userSiteCode = null;
+if (!empty($user['site_id'])) {
+    $us = $db->fetchOne("SELECT site_code FROM sites WHERE id = ? LIMIT 1", [$user['site_id']]);
+    $userSiteCode = $us['site_code'] ?? null;
+}
+
 if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
     jsonResponse(false, null, 'กรุณาเลือกไฟล์ที่ต้องการนำเข้า', 400);
 }
@@ -123,6 +130,7 @@ function bulkInsertAssets($db, $pendingInserts, $batchSize = 500)
     if (empty($pendingInserts)) return array('inserted' => 0, 'errors' => array());
 
     $columns = array(
+        'site_code',
         'plant_code',
         'class_code',
         'asset_no',
@@ -199,21 +207,39 @@ $dataRows = array_slice($rows, 1);
 $existingMap = array();
 $allAssetNos = array();
 $assetNoIdx = array_search('asset_no', $headerRow);
+// also collect plant codes present in the file to map plants -> sites
+$plantCodeIdx = array_search('plant_code', $headerRow);
+$allPlantCodes = array();
 
 if ($assetNoIdx !== false) {
     foreach ($dataRows as $r) {
         if (!empty($r[$assetNoIdx])) $allAssetNos[] = trim((string)$r[$assetNoIdx]);
+        if ($plantCodeIdx !== false && !empty($r[$plantCodeIdx])) $allPlantCodes[] = trim((string)$r[$plantCodeIdx]);
+    }
+}
+
+// Build mapping plant_code -> site_code for rows in the file
+$plantToSite = array();
+if (!empty($allPlantCodes)) {
+    $allPlantCodes = array_values(array_unique($allPlantCodes));
+    $php = implode(',', array_fill(0, count($allPlantCodes), '?'));
+    $resPlants = $db->fetchAll("SELECT p.plant_code, s.site_code FROM plants p LEFT JOIN sites s ON p.site_id = s.id WHERE p.plant_code IN ($php)", $allPlantCodes);
+    if ($resPlants) {
+        foreach ($resPlants as $pp) {
+            $plantToSite[$pp['plant_code']] = $pp['site_code'] ?? null;
+        }
     }
 }
 
 if (!empty($allAssetNos)) {
     $ph = implode(',', array_fill(0, count($allAssetNos), '?'));
     // ดึง plant_code มาด้วยเพื่อความแม่นยำ
-    $res = $db->fetchAll("SELECT id, asset_no, plant_code,cap_date FROM assets WHERE asset_no IN ($ph)", $allAssetNos);
+    // fetch existing assets across sites (we'll compose keys including site_code)
+    $res = $db->fetchAll("SELECT id, asset_no, plant_code, site_code, cap_date FROM assets WHERE asset_no IN ($ph)", $allAssetNos);
     if ($res) {
         foreach ($res as $r) {
-            // สร้าง Key คู่ระหว่าง Plant + Asset No
-            $compositeKey = $r['plant_code'] . '_' . $r['asset_no'] . '_' . $r['cap_date'];
+            // สร้าง Key คู่ระหว่าง Site + Plant + Asset No + cap_date
+            $compositeKey = (isset($r['site_code']) ? $r['site_code'] : '') . '_' . $r['plant_code'] . '_' . $r['asset_no'] . '_' . $r['cap_date'];
             $existingMap[$compositeKey] = $r['id'];
         }
     }
@@ -250,7 +276,15 @@ try {
         $plantCode = $row['plant_code'];
         $capDate = parseDate(isset($row['cap_date']) ? $row['cap_date'] : '');
         $acquis_val = (float)str_replace(',', '', isset($row['acquis_val']) ? $row['acquis_val'] : 0);
-        $currentKey = $plantCode . '_' . $assetNo . '_' . $capDate.'_'.$acquis_val;
+        // determine site_code for this row: prefer mapping from plant, else uploader's site
+        $rowSiteCode = '';
+        if (!empty($plantCode) && isset($plantToSite[$plantCode])) {
+            $rowSiteCode = $plantToSite[$plantCode];
+        }
+        if (empty($rowSiteCode) && !empty($userSiteCode)) {
+            $rowSiteCode = $userSiteCode;
+        }
+        $currentKey = ($rowSiteCode ?? '') . '_' . $plantCode . '_' . $assetNo . '_' . $capDate . '_' . $acquis_val;
 
         $existsId = isset($existingMap[$currentKey]) ? $existingMap[$currentKey] : null;
 
@@ -260,6 +294,7 @@ try {
         }
 
         $data = array(
+            'site_code'         => $rowSiteCode,
             'plant_code'        => $row['plant_code'],
             'class_code'        => isset($row['class_code']) ? $row['class_code'] : '',
             'asset_no'          => $assetNo,
@@ -319,6 +354,7 @@ $db->insert('import_logs', array(
     'actual_new_records' => $actualNewRecords,
     'status'             => 'completed',
     'imported_by'        => $user['id'],
+    'site_code'          => $userSiteCode,
     'error_detail'       => json_encode($errors, JSON_UNESCAPED_UNICODE)
 ));
 

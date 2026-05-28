@@ -24,9 +24,31 @@ $auditYears = $db->fetchAll("
 ");
 $selectedYear = intval($_GET['audit_year'] ?? (empty($auditYears) ? date('Y') : $auditYears[0]['session_year']));
 
+$recentPage  = max(1, intval($_GET['rpage'] ?? 1));
+$recentLimit = 8;
+$recentOffset = ($recentPage - 1) * $recentLimit;
+
 $dashYearFilterSql = " AND s.session_year = ? ";
 $dashYearParams = [$selectedYear];
 
+$cacheDir = sys_get_temp_dir() . '/smartasset_dashboard';
+if (!is_dir($cacheDir)) {
+    @mkdir($cacheDir, 0777, true);
+}
+$cacheFile = $cacheDir . '/dashboard_' . $selectedYear . '_p' . $recentPage . '.json';
+$cacheTtl = 60; // seconds
+$cacheLoaded = false;
+if (is_file($cacheFile) && (time() - filemtime($cacheFile) < $cacheTtl)) {
+    $cacheData = json_decode(file_get_contents($cacheFile), true);
+    if (is_array($cacheData)) {
+        foreach ($cacheData as $key => $value) {
+            ${$key} = $value;
+        }
+        $cacheLoaded = true;
+    }
+}
+
+if (! $cacheLoaded) {
 // ═══ 📊 LOGIC ตรวจสอบยอดต่าง ASSETS กับ AUDIT ASSIGNMENT (เพิ่มเข้ามาใหม่) ═══
 // 1. นับจำนวนทรัพย์สินทั้งหมดที่มีอยู่ใน Master Data ปัจจุบัน (ที่มีสถานะ Active)
 $masterTotalAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1")['c']; // status = 'active'
@@ -147,10 +169,6 @@ $classData = $db->fetchAll("
 ", $dashYearParams);
 
 // Recent assets
-$recentPage  = max(1, intval($_GET['rpage'] ?? 1));
-$recentLimit = 8;
-$recentOffset = ($recentPage - 1) * $recentLimit;
-
 $recentTotal = $db->fetchOne("
     SELECT COUNT(DISTINCT aa.asset_id) as c
     FROM audit_assignments aa
@@ -171,21 +189,22 @@ $recentAssets = $db->fetchAll("
 $plantStats = $db->fetchAll("
     SELECT a.plant_code,
            COALESCE(p.plant_name, a.plant_code) AS plant_name,
-           COUNT(DISTINCT aa.asset_id)                                         AS total,
+           COUNT(DISTINCT a.id)                                         AS total,
+           COUNT(DISTINCT CASE WHEN s.id IS NOT NULL THEN a.id END)     AS inspected_count,
            SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count,
            SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS cancelled_count,
            SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"active\"%' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS other_count,
            SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN COALESCE(a.acquis_val,0) ELSE 0 END) AS total_value
-    FROM audit_assignments aa
-    INNER JOIN audit_sessions s ON aa.session_id = s.id
-    INNER JOIN assets a ON aa.asset_id = a.id
+    FROM assets a
+    LEFT JOIN audit_assignments aa ON aa.asset_id = a.id
+    LEFT JOIN audit_sessions s ON aa.session_id = s.id AND s.session_year = ?
     LEFT JOIN plants p ON a.plant_code = p.plant_code
-    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . "
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''
     GROUP BY a.plant_code, p.plant_name
     ORDER BY a.plant_code
 ", $dashYearParams);
 
-$ccRaw = $db->fetchAll("
+$ccRaw = $db->fetchAll(" 
     SELECT a.plant_code, a.cost_center,
            COUNT(DISTINCT aa.asset_id) AS total,
            SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count,
@@ -227,8 +246,42 @@ foreach ($statusByPlantRaw as $r) {
         $statusByPlant[$r['plant_code']][$r['res_status']] = (int)$r['cnt'];
     }
 }
+
+$cacheData = [
+    'masterTotalAssets' => $masterTotalAssets,
+    'assignedInSession' => $assignedInSession,
+    'missingAssetCount' => $missingAssetCount,
+    'totalAssets' => $totalAssets,
+    'activeAssets' => $activeAssets,
+    'inactiveAssets' => $inactiveAssets,
+    'totalValue' => $totalValue,
+    'monthlyData' => $monthlyData,
+    'session' => $session,
+    'invTotal' => $invTotal,
+    'invChecked' => $invChecked,
+    'invPct' => $invPct,
+    'statusData' => $statusData,
+    'deptData' => $deptData,
+    'classData' => $classData,
+    'recentTotal' => $recentTotal,
+    'recentPages' => $recentPages,
+    'recentAssets' => $recentAssets,
+    'plantStats' => $plantStats,
+    'ccByPlant' => $ccByPlant,
+    'statusByPlant' => $statusByPlant,
+];
+
+@file_put_contents($cacheFile, json_encode($cacheData, JSON_UNESCAPED_UNICODE));
+}
 ?>
 <?php include __DIR__ . '/../components/head.php'; ?>
+
+<div id="pageLoadingOverlay" class="fixed inset-0 z-50 flex items-center justify-center bg-white/80">
+    <div class="text-center">
+        <div class="spinner text-blue-600 mb-3"></div>
+        <p class="text-sm text-gray-600">กำลังโหลดแดชบอร์ด...</p>
+    </div>
+</div>
 
 <div class="min-h-screen">
     <?php include __DIR__ . '/../components/sidebar.php'; ?>
@@ -296,7 +349,7 @@ foreach ($statusByPlantRaw as $r) {
             <nav class="flex overflow-x-auto gap-0.5 -mb-px no-scrollbar">
                 <button onclick="switchPlantTab('all')" id="tab-all"
                     class="plant-tab active flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors border-blue-600 text-blue-700 bg-blue-50/50">
-                    <i class="fas fa-globe mr-1"></i> ทั้งหมด
+                    <i class="fas fa-globe mr-1"></i> ทั้งหมด <span class="text-[10px] text-gray-400">(<?= number_format($masterTotalAssets) ?>)</span>
                 </button>
                 <?php foreach ($plantStats as $ps): ?>
                 <button onclick="switchPlantTab('<?= htmlspecialchars($ps['plant_code'], ENT_QUOTES) ?>')"
@@ -311,10 +364,21 @@ foreach ($statusByPlantRaw as $r) {
 
         <div id="content-all">
 
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
             <div class="stat-card">
                 <div class="flex items-center justify-between mb-3">
-                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ทรัพย์สินในรอบปีนี้</p>
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ทรัพย์สิน Master</p>
+                    <div class="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center">
+                        <i class="fas fa-database text-slate-600 text-sm"></i>
+                    </div>
+                </div>
+                <p class="text-2xl font-bold text-gray-900"><?= number_format($masterTotalAssets) ?></p>
+                <p class="text-xs text-gray-400 mt-1">รายการ</p>
+            </div>
+
+            <div class="stat-card">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ทรัพย์สินตรวจนับในปี</p>
                     <div class="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
                         <i class="fas fa-cubes text-blue-600 text-sm"></i>
                     </div>
@@ -479,15 +543,25 @@ foreach ($statusByPlantRaw as $r) {
                 <a href="asset-list.php?plant=<?= urlencode($pCode) ?>" class="text-xs text-blue-600 hover:underline font-medium">ดูรายการทั้งหมด →</a>
             </div>
 
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-5">
                 <div class="stat-card">
                     <div class="flex items-center justify-between mb-2">
-                        <p class="text-xs font-semibold text-gray-500 uppercase">ทรัพย์สินทั้งหมด</p>
+                        <p class="text-xs font-semibold text-gray-500 uppercase">ทรัพย์สิน Master</p>
                         <div class="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center">
-                            <i class="fas fa-cubes text-blue-600 text-xs"></i>
+                            <i class="fas fa-database text-blue-600 text-xs"></i>
                         </div>
                     </div>
                     <p class="text-2xl font-bold text-gray-900"><?= number_format($ps['total']) ?></p>
+                    <p class="text-xs text-gray-400 mt-1">รายการ</p>
+                </div>
+                <div class="stat-card">
+                    <div class="flex items-center justify-between mb-2">
+                        <p class="text-xs font-semibold text-gray-500 uppercase">ตรวจนับในปี <?= htmlspecialchars($selectedYear) ?></p>
+                        <div class="w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center">
+                            <i class="fas fa-calendar-check text-slate-600 text-xs"></i>
+                        </div>
+                    </div>
+                    <p class="text-2xl font-bold text-gray-900"><?= number_format($ps['inspected_count']) ?></p>
                     <p class="text-xs text-gray-400 mt-1">รายการ</p>
                 </div>
                 <div class="stat-card">
@@ -697,6 +771,16 @@ function changeAuditYear(year) {
     url.searchParams.set('audit_year', year);
     window.location = url.toString();
 }
+
+window.addEventListener('DOMContentLoaded', () => {
+    const overlay = document.getElementById('pageLoadingOverlay');
+    if (overlay) overlay.style.display = 'none';
+});
+
+window.addEventListener('beforeunload', () => {
+    const overlay = document.getElementById('pageLoadingOverlay');
+    if (overlay) overlay.style.display = 'flex';
+});
 </script>
 </body>
 </html>

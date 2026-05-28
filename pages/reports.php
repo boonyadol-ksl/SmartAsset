@@ -26,23 +26,48 @@ $plantStats = $db->fetchAll(
     "GROUP BY a.plant_code, p.plant_name ORDER BY a.plant_code"
 );
 
+// เตรียมเงื่อนไขสำหรับ Plant
 $plantFilterSql = '';
 $plantFilterParams = [];
 if ($selectedPlant !== '') {
-    $plantFilterSql = " AND plant_code = ?";
+    $plantFilterSql = " AND a.plant_code = ?";
     $plantFilterParams[] = $selectedPlant;
 }
 
-$yearFilterSql = " AND YEAR(cap_date) BETWEEN ? AND ?";
+// 💡 เปลี่ยนมาใช้ s.session_year ของตารางรอบตรวจนับเป็นหลักสำหรับทุก Query ในหน้านี้
+$yearFilterSql = " AND s.session_year BETWEEN ? AND ?";
 $yearFilterParams = [$yearStart, $selectedYear];
 $summaryFilterSql = $plantFilterSql . $yearFilterSql;
 $summaryFilterParams = array_merge($plantFilterParams, $yearFilterParams);
 
-// Summary data
-$totalAssets   = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1" . $summaryFilterSql, $summaryFilterParams)['c'];
-$activeAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'" . $summaryFilterSql, $summaryFilterParams)['c'];
-$cancelled     = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='cancelled'" . $summaryFilterSql, $summaryFilterParams)['c'];
-$totalValue    = $db->fetchOne("SELECT IFNULL(SUM(acquis_val),0) as v FROM assets WHERE status='active'" . $summaryFilterSql, $summaryFilterParams)['v'];
+// ═══ Summary data (เปลี่ยนมานับความสัมพันธ์จากรอบการตรวจนับ) ═══
+$totalAssets   = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     WHERE 1=1" . $summaryFilterSql, $summaryFilterParams)['c'];
+
+$activeAssets  = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $summaryFilterSql, $summaryFilterParams)['c'];
+
+$cancelled     = $db->fetchOne(
+    "SELECT COUNT(DISTINCT aa.asset_id) as c
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%'" . $summaryFilterSql, $summaryFilterParams)['c'];
+
+$totalValue    = $db->fetchOne(
+    "SELECT IFNULL(SUM(a.acquis_val),0) as v
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $summaryFilterSql, $summaryFilterParams)['v'];
 
 $openAuditSession = $db->fetchOne("SELECT * FROM audit_sessions ORDER BY id DESC LIMIT 1");
 $checkedByDept = [];
@@ -59,40 +84,95 @@ if ($openAuditSession) {
     }
 }
 
-// By Department
+// ═══ Assignment counts for selected session_year range (used to compute % การตรวจนับ) ═══
+$assignedByDeptYear = [];
+$completedByDeptYear = [];
+
+$sessParams = [$yearStart, $selectedYear];
+$plantJoin = '';
+$plantParams = [];
+if ($selectedPlant !== '') {
+    $plantJoin = " AND a.plant_code = ?";
+    $plantParams[] = $selectedPlant;
+}
+
+// Assigned (any status) within sessions for the selected years
+$rows = $db->fetchAll(
+    "SELECT a.department_code, COUNT(DISTINCT aa.asset_id) AS assigned_count " .
+    "FROM audit_assignments aa " .
+    "JOIN audit_sessions s ON aa.session_id = s.id " .
+    "JOIN assets a ON aa.asset_id = a.id " .
+    "WHERE s.session_year BETWEEN ? AND ?" . $plantJoin .
+    " GROUP BY a.department_code",
+    array_merge($sessParams, $plantParams)
+);
+foreach ($rows as $row) {
+    $assignedByDeptYear[$row['department_code']] = (int)$row['assigned_count'];
+}
+
+// Completed assignments within sessions for the selected years
+$rows = $db->fetchAll(
+    "SELECT a.department_code, COUNT(DISTINCT aa.asset_id) AS completed_count " .
+    "FROM audit_assignments aa " .
+    "JOIN audit_sessions s ON aa.session_id = s.id " .
+    "JOIN assets a ON aa.asset_id = a.id " .
+    "WHERE s.session_year BETWEEN ? AND ? AND aa.status = 'completed'" . $plantJoin .
+    " GROUP BY a.department_code",
+    array_merge($sessParams, $plantParams)
+);
+foreach ($rows as $row) {
+    $completedByDeptYear[$row['department_code']] = (int)$row['completed_count'];
+}
+
+// ═══ By Department ═══
 $byDept = $db->fetchAll(
-    "SELECT a.department_code, a.department_name, COUNT(*) as total, COUNT(*) as cnt, " .
-    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"active\"%' THEN 1 ELSE 0 END) AS active_count, " .
-    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"returned\"%' THEN 1 ELSE 0 END) AS returned_count, " .
-    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"repairing\"%' THEN 1 ELSE 0 END) AS repairing_count, " .
-    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"not_found\"%' THEN 1 ELSE 0 END) AS not_found_count, " .
-    "SUM(CASE WHEN aa.remark LIKE '%\"check_result\":\"inactive\"%' THEN 1 ELSE 0 END) AS inactive_count, " .
-    "IFNULL(SUM(a.acquis_val),0) as val " .
-    "FROM assets a " .
-    "LEFT JOIN (" .
-    "    SELECT aa1.asset_id, aa1.remark " .
-    "    FROM audit_assignments aa1 " .
-    "    WHERE aa1.status = 'completed' " .
-    "      AND aa1.id = (" .
-    "          SELECT MAX(aa2.id) " .
-    "          FROM audit_assignments aa2 " .
-    "          WHERE aa2.asset_id = aa1.asset_id " .
-    "            AND aa2.status = 'completed'" .
-    "      )" .
-    ") aa ON aa.asset_id = a.id " .
-    "WHERE 1=1" . $plantFilterSql . $yearFilterSql . " GROUP BY a.department_code, a.department_name ORDER BY total DESC",
-    array_merge($plantFilterParams, $yearFilterParams)
+    "SELECT a.department_code, a.department_name, COUNT(DISTINCT aa.asset_id) as total, COUNT(DISTINCT aa.asset_id) as cnt, " .
+    "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count, " .
+    "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' THEN 1 ELSE 0 END) AS returned_count, " .
+    "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%' THEN 1 ELSE 0 END) AS repairing_count, " .
+    "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"not_found\"%' THEN 1 ELSE 0 END) AS not_found_count, " .
+    "SUM(CASE WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS inactive_count, " .
+    "IFNULL(SUM(a.acquis_val), 0) as val " .
+    "FROM audit_assignments aa " .
+    "INNER JOIN audit_sessions s ON aa.session_id = s.id " .
+    "INNER JOIN assets a ON aa.asset_id = a.id " .
+    "WHERE aa.status = 'completed' " .
+    "  AND aa.id = (" .
+    "      SELECT MAX(aa2.id) " .
+    "      FROM audit_assignments aa2 " .
+    "      WHERE aa2.asset_id = aa.asset_id " .
+    "        AND aa2.status = 'completed'" .
+    "  )" . $summaryFilterSql . " GROUP BY a.department_code, a.department_name ORDER BY total DESC",
+    $summaryFilterParams
 );
 
-// By Class
+// ═══ By Class ═══
 $classPage   = max(1, intval($_GET['cpage'] ?? 1));
 $classLimit  = 10;
 $classOffset = ($classPage - 1) * $classLimit;
-$classTotal  = $db->fetchOne("SELECT COUNT(DISTINCT a.class_code) as c FROM assets a WHERE a.status='active'" . $plantFilterSql . $yearFilterSql, array_merge($plantFilterParams, $yearFilterParams))['c'];
-$classPages  = max(1, ceil($classTotal / $classLimit));
-$byClass = $db->fetchAll("SELECT c.class_code, c.class_name, COUNT(a.id) as cnt, IFNULL(SUM(a.acquis_val),0) as val FROM assets a LEFT JOIN asset_classes c ON a.class_code=c.class_code WHERE a.status='active'" . $plantFilterSql . $yearFilterSql . " GROUP BY c.class_code, c.class_name ORDER BY cnt DESC LIMIT $classLimit OFFSET $classOffset", array_merge($plantFilterParams, $yearFilterParams));
 
-// Monthly acquisition (selected audit year)
+$classTotal  = $db->fetchOne(
+    "SELECT COUNT(DISTINCT a.class_code) as c
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     WHERE aa.status='completed'" . $summaryFilterSql,
+    $summaryFilterParams
+)['c'];
+
+$classPages  = max(1, ceil($classTotal / $classLimit));
+
+$byClass = $db->fetchAll(
+    "SELECT c.class_code, c.class_name, COUNT(DISTINCT aa.asset_id) as cnt, IFNULL(SUM(a.acquis_val),0) as val
+     FROM audit_assignments aa
+     INNER JOIN audit_sessions s ON aa.session_id = s.id
+     INNER JOIN assets a ON aa.asset_id = a.id
+     LEFT JOIN asset_classes c ON a.class_code=c.class_code
+     WHERE aa.status='completed'" . $summaryFilterSql . " GROUP BY c.class_code, c.class_name ORDER BY cnt DESC LIMIT $classLimit OFFSET $classOffset",
+    $summaryFilterParams
+);
+
+// Monthly acquisition (ยังคงค้นหาจากทรัพย์สินตามปีเดิมคงเดิมไว้)
 $monthlyWhere = "WHERE cap_date IS NOT NULL";
 $monthlyParams = [];
 if ($selectedPlant !== '') {
@@ -179,7 +259,6 @@ $monthly = $db->fetchAll(
             </nav>
         </div>
 
-        <!-- Summary Stats -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <div class="stat-card">
                 <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">ทรัพย์สินทั้งหมด</p>
@@ -200,7 +279,6 @@ $monthly = $db->fetchAll(
             </div>
         </div>
 
-        <!-- Charts Row 1 -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
             <div class="card p-5">
                 <h3 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินตามแผนก</h3>
@@ -212,13 +290,11 @@ $monthly = $db->fetchAll(
             </div>
         </div>
 
-        <!-- Monthly Chart -->
         <div class="card p-5 mb-5">
             <h3 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินที่ซื้อรายเดือน (ช่วงปี <?= htmlspecialchars($yearLabel) ?>)</h3>
             <div id="chartMonthly" class="min-h-[220px]"></div>
         </div>
 
-        <!-- Table by Department -->
         <div class="card mb-5">
             <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <div>
@@ -249,8 +325,9 @@ $monthly = $db->fetchAll(
                     </thead>
                     <tbody>
                         <?php foreach ($byDept as $d): ?>
-                        <?php $checked = $checkedByDept[$d['department_code'] ?? ''] ?? 0; ?>
-                        <?php $pct = $d['total'] > 0 ? round($checked / $d['total'] * 100, 1) : 0; ?>
+                        <?php $assigned = $assignedByDeptYear[$d['department_code'] ?? ''] ?? 0; ?>
+                        <?php $completed = $completedByDeptYear[$d['department_code'] ?? ''] ?? 0; ?>
+                        <?php $pct = $assigned > 0 ? round($completed / $assigned * 100, 1) : 0; ?>
                         <tr>
                             <td class="font-medium text-gray-900 text-left"><?= htmlspecialchars($d['department_name'] ?? '(ไม่ระบุ)') ?></td>
                             <td class="text-right font-semibold"><?= number_format($d['total']) ?></td>
@@ -262,7 +339,7 @@ $monthly = $db->fetchAll(
                             <td class="text-right">
                                 <?= number_format($d['val'], 2) ?>
                             </td>
-                            <td class="text-right font-semibold"><?= $openAuditSession ? $pct . '%' : '-' ?></td>
+                            <td class="text-right font-semibold"><?= $pct . '%' ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -283,7 +360,6 @@ $monthly = $db->fetchAll(
             </div>
         </div>
 
-        <!-- Table by Class -->
         <div class="card">
             <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                 <h3 class="font-bold text-gray-900 text-sm">รายงานตามประเภท</h3>

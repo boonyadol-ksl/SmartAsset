@@ -13,7 +13,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
     <div class="flex items-center gap-3 px-6 py-5 border-b border-white/10">
         <div class="w-9 h-9 rounded-xl bg-blue-500 flex items-center justify-center flex-shrink-0">
             <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
             </svg>
         </div>
         <div>
@@ -28,82 +28,97 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 
         <a href="dashboard.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'dashboard' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
             <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
             Dashboard
         </a>
 
         <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 mb-2 mt-4">จัดการทรัพย์สิน</p>
 
-        <?php if (hasRole(['admin','webadmin'])): ?>
-        <a href="asset-import.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'asset-import' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-            </svg>
-            นำเข้าทรัพย์สิน
-        </a>
-         <a href="asset-list.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= in_array($currentPage, ['asset-list','asset-detail']) ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
-            รายการทรัพย์สิน
-        </a>
+        <?php if (hasRole(['admin', 'webadmin'])): ?>
+            <a href="asset-import.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'asset-import' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                นำเข้าทรัพย์สิน
+            </a>
+            <a href="asset-list.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= in_array($currentPage, ['asset-list', 'asset-detail']) ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                รายการทรัพย์สิน
+            </a>
         <?php endif; ?>
 
-        <?php if (hasRole(['admin','webadmin','inventory'])): ?>
-        <a href="inventory.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'inventory' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            ตรวจนับทรัพย์สิน
-        </a>
+        <?php if (hasRole(['admin', 'webadmin', 'inventory'])): ?>
+            <a href="inventory.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'inventory' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                ตรวจนับทรัพย์สิน
+            </a>
         <?php endif; ?>
 
-        <?php if (hasRole(['admin','webadmin'])): ?>
-        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 mb-2 mt-4">รายงาน</p>
-        <a href="reports.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'reports' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            รายงาน & Export
-        </a>
+        <?php if (hasRole(['admin', 'webadmin'])): ?>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 mb-2 mt-4">รายงาน</p>
+            <a href="reports.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'reports' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                รายงาน & Export
+            </a>
         <?php endif; ?>
 
         <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider px-3 mb-2 mt-4">ตั้งค่าระบบ</p>
 
-        <?php if (hasRole(['admin','webadmin'])): ?>
-        <a href="user.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'user' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
-            </svg>
-            จัดการผู้ใช้งาน
-        </a>
+        <?php if (hasRole(['admin', 'webadmin'])): ?>
+            <a href="user.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'user' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                </svg>
+                จัดการผู้ใช้งาน
+            </a>
 
-        <a href="manage_audit.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'manage_audit' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-            </svg>
-            สร้างรอบการตรวจนับ
-        </a>
+            <a href="manage_audit.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'manage_audit' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                </svg>
+                สร้างรอบการตรวจนับ
+            </a>
 
-        <!-- NEW: จัดการ Site (Multi-Site) -->
-        <a href="sites.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'sites' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
-            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M4 10h16M6 10V4h12v6M6 21v-7m4 7v-7m4 7v-7m4 7v-7"/>
-            </svg>
-            จัดการ Site
-        </a>
+            <!-- NEW: จัดการ Site (Multi-Site) -->
+            <a href="sites.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'sites' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
+                <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 21h18M4 10h16M6 10V4h12v6M6 21v-7m4 7v-7m4 7v-7m4 7v-7" />
+                </svg>
+                จัดการ Site
+            </a>
         <?php endif; ?>
 
         <a href="password.php" class="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-colors <?= $currentPage === 'password' ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-white/10' ?>">
             <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 12v-2m0 0l-4-4m4 4"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 12v-2m0 0l-4-4m4 4" />
             </svg>
             เปลี่ยนรหัสผ่าน
         </a>
 
     </nav>
 
+    <div class="px-4 mb-2">
+    <a href="<?= APP_URL ?>/pages/help.php" target="_blank"
+       class="flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-blue-500/10 to-indigo-500/5 hover:from-blue-500/20 hover:to-indigo-500/15 border border-blue-500/20 hover:border-blue-500/40 rounded-xl transition-all duration-200 group shadow-sm shadow-blue-500/5">
+        <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-7 h-7 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center group-hover:bg-blue-500 group-hover:text-white transition-all duration-200">
+                <i class="fas fa-book-open text-xs"></i>
+            </div>
+            <div class="flex flex-col">
+                <span class="text-xs font-semibold text-gray-200 group-hover:text-white transition-colors">คู่มือการใช้งานระบบ</span>
+                <span class="text-[10px] text-gray-400 group-hover:text-gray-300 transition-colors">Help & Knowledge Guide</span>
+            </div>
+        </div>
+        <i class="fas fa-external-link-alt text-[10px] text-gray-500 group-hover:text-blue-400 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"></i>
+    </a>
+</div>
     <!-- User Profile -->
     <div class="px-4 py-4 border-t border-white/10">
         <div class="flex items-center gap-3">
@@ -116,7 +131,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             </div>
             <a href="<?= APP_URL ?>/api/logout.php" class="text-gray-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10" title="ออกจากระบบ">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
             </a>
         </div>
@@ -132,7 +147,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             <button onclick="toggleSidebar()"
                 class="lg:hidden p-2 rounded-xl text-gray-500 hover:bg-gray-100 transition-colors">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
             </button>
 
@@ -229,142 +244,150 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 </header>
 
 <script>
-(() => {
-  const panel = document.getElementById('tbPanel');
-  const toggle = document.getElementById('tbToggle');
-  const closeBtn = document.getElementById('tbClose');
-  const pendingEl = document.getElementById('tbPending');
-  const dot = document.getElementById('tbDot');
-  const blink = document.getElementById('tbBlink');
-  const deadlineChip = document.getElementById('tbDeadlineChip');
-  const deadlineLabel = document.getElementById('tbDeadlineLabel');
-  const deadlineSub = document.getElementById('tbDeadlineSub');
-  const sessionsWrap = document.getElementById('tbSessions');
-  const panelSub = document.getElementById('tbPanelSub');
-  const alertWrap = document.getElementById('tbAlertWrap');
-  const alertBox = document.getElementById('tbAlertBox');
-  const alertText = document.getElementById('tbAlertText');
-  const alertIcon = document.getElementById('tbAlertIcon');
+    (() => {
+        const panel = document.getElementById('tbPanel');
+        const toggle = document.getElementById('tbToggle');
+        const closeBtn = document.getElementById('tbClose');
+        const pendingEl = document.getElementById('tbPending');
+        const scoreEl = document.getElementById('tbScore');
+        const dot = document.getElementById('tbDot');
+        const blink = document.getElementById('tbBlink');
+        const deadlineChip = document.getElementById('tbDeadlineChip');
+        const deadlineLabel = document.getElementById('tbDeadlineLabel');
+        const deadlineSub = document.getElementById('tbDeadlineSub');
+        const sessionsWrap = document.getElementById('tbSessions');
+        const panelSub = document.getElementById('tbPanelSub');
+        const alertWrap = document.getElementById('tbAlertWrap');
+        const alertBox = document.getElementById('tbAlertBox');
+        const alertText = document.getElementById('tbAlertText');
+        const alertIcon = document.getElementById('tbAlertIcon');
 
-  // Guard: กัน JS พังในกรณี DOM ไม่ครบ/บางหน้ามี layout ต่างกัน
-  if (!panel || !toggle || !pendingEl || !dot || !blink || !deadlineChip || !deadlineLabel || !sessionsWrap) {
-    return;
-  }
+        // Guard: กัน JS พังในกรณี DOM ไม่ครบ/บางหน้ามี layout ต่างกัน
+        if (!panel || !toggle || !pendingEl || !scoreEl || !dot || !blink || !deadlineChip || !deadlineLabel || !sessionsWrap) {
+            return;
+        }
 
-  function openPanel() { panel.classList.remove('hidden'); }
-  function closePanel() { panel.classList.add('hidden'); }
+        function openPanel() {
+            panel.classList.remove('hidden');
+        }
 
-  // เลี่ยง optional chaining เพื่อรองรับ browser เก่ากว่า
-  toggle.addEventListener('click', (e) => {
-    e.stopPropagation();
-    panel.classList.contains('hidden') ? openPanel() : closePanel();
-  });
-  if (closeBtn) closeBtn.addEventListener('click', closePanel);
-  document.addEventListener('click', (e) => {
-    if (panel.classList.contains('hidden')) return;
-    if (!panel.contains(e.target) && e.target !== toggle) closePanel();
-  });
+        function closePanel() {
+            panel.classList.add('hidden');
+        }
 
-  function setChip(status) {
-    // status: overdue | near | ok | none | no_pending
-    // reset
-    toggle.className = 'inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition';
-    blink.className = 'hidden absolute inline-flex h-full w-full rounded-full opacity-75';
-    dot.className = 'relative inline-flex rounded-full h-2 w-2';
+        // เลี่ยง optional chaining เพื่อรองรับ browser เก่ากว่า
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panel.classList.contains('hidden') ? openPanel() : closePanel();
+        });
+        if (closeBtn) closeBtn.addEventListener('click', closePanel);
+        document.addEventListener('click', (e) => {
+            if (panel.classList.contains('hidden')) return;
+            if (!panel.contains(e.target) && e.target !== toggle) closePanel();
+        });
 
-    const base = ' bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
-    let cls = base;
-    let dotCls = ' bg-gray-400';
-    let blinkCls = '';
+        function setChip(status) {
+            // status: overdue | near | ok | none | no_pending
+            // reset
+            toggle.className = 'inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition';
+            blink.className = 'hidden absolute inline-flex h-full w-full rounded-full opacity-75';
+            dot.className = 'relative inline-flex rounded-full h-2 w-2';
 
-    if (status === 'overdue') {
-      cls = ' bg-red-50 text-red-700 border-red-200 hover:bg-red-100';
-      dotCls = ' bg-red-500';
-      blinkCls = ' animate-ping bg-red-400';
-    } else if (status === 'near') {
-      cls = ' bg-orange-50 text-orange-800 border-orange-200 hover:bg-orange-100';
-      dotCls = ' bg-orange-500';
-      blinkCls = ' animate-ping bg-orange-400';
-    } else if (status === 'ok') {
-      // ยังมีงานค้าง แต่ยังอยู่ในกรอบเวลา => ใช้ "น้ำเงิน" จะสื่อว่าให้ทำต่อ (ไม่ใช่เสร็จแล้ว)
-      cls = ' bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100';
-      dotCls = ' bg-blue-500';
-    } else if (status === 'no_pending') {
-      // ไม่มีงานค้าง => ใช้ "เขียว" สื่อว่าจบ/ปกติ
-      cls = ' bg-green-50 text-green-700 border-green-200 hover:bg-green-100';
-      dotCls = ' bg-green-500';
-    }
+            const base = ' bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100';
+            let cls = base;
+            let dotCls = ' bg-gray-400';
+            let blinkCls = '';
 
-    toggle.className += cls;
-    dot.className += dotCls;
-    if (blinkCls) {
-      blink.className = 'absolute inline-flex h-full w-full rounded-full opacity-75' + blinkCls;
-    }
-  }
+            if (status === 'overdue') {
+                cls = ' bg-red-50 text-red-700 border-red-200 hover:bg-red-100';
+                dotCls = ' bg-red-500';
+                blinkCls = ' animate-ping bg-red-400';
+            } else if (status === 'near') {
+                cls = ' bg-orange-50 text-orange-800 border-orange-200 hover:bg-orange-100';
+                dotCls = ' bg-orange-500';
+                blinkCls = ' animate-ping bg-orange-400';
+            } else if (status === 'ok') {
+                // ยังมีงานค้าง แต่ยังอยู่ในกรอบเวลา => ใช้ "น้ำเงิน" จะสื่อว่าให้ทำต่อ (ไม่ใช่เสร็จแล้ว)
+                cls = ' bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100';
+                dotCls = ' bg-blue-500';
+            } else if (status === 'no_pending') {
+                // ไม่มีงานค้าง => ใช้ "เขียว" สื่อว่าจบ/ปกติ
+                cls = ' bg-green-50 text-green-700 border-green-200 hover:bg-green-100';
+                dotCls = ' bg-green-500';
+            }
 
-  function setDeadlineChip(status, label, sub) {
-    deadlineChip.className = 'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold max-w-[11rem] sm:max-w-none';
-    if (status === 'overdue') deadlineChip.className += ' bg-red-50 text-red-700 border-red-200';
-    else if (status === 'near') deadlineChip.className += ' bg-orange-50 text-orange-800 border-orange-200';
-    else if (status === 'ok') deadlineChip.className += ' bg-blue-50 text-blue-700 border-blue-200';
-    else deadlineChip.className += ' bg-gray-50 text-gray-600 border-gray-200';
+            toggle.className += cls;
+            dot.className += dotCls;
+            if (blinkCls) {
+                blink.className = 'absolute inline-flex h-full w-full rounded-full opacity-75' + blinkCls;
+            }
+        }
 
-    deadlineLabel.textContent = label || 'Deadline';
-    deadlineSub.textContent = sub || '';
-  }
+        function setDeadlineChip(status, label, sub) {
+            deadlineChip.className = 'flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold max-w-[11rem] sm:max-w-none';
+            if (status === 'overdue') deadlineChip.className += ' bg-red-50 text-red-700 border-red-200';
+            else if (status === 'near') deadlineChip.className += ' bg-orange-50 text-orange-800 border-orange-200';
+            else if (status === 'ok') deadlineChip.className += ' bg-blue-50 text-blue-700 border-blue-200';
+            else if (status === 'no_pending') deadlineChip.className += ' bg-emerald-50 text-emerald-700 border-emerald-100';
+            else deadlineChip.className += ' bg-gray-50 text-gray-600 border-gray-200';
 
-  function setAlert(status, text) {
-    if (!text) {
-      alertWrap.classList.add('hidden');
-      return;
-    }
-    alertWrap.classList.remove('hidden');
-    alertBox.className = 'flex items-start gap-2 p-3 rounded-xl border';
+            deadlineLabel.textContent = label || 'Deadline';
+            deadlineSub.textContent = sub || '';
+        }
 
-    if (status === 'overdue') {
-      alertBox.className += ' bg-red-50 border-red-200 text-red-900';
-      alertIcon.innerHTML = '<svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.02 14A2 2 0 004.02 21h15.96a2 2 0 001.73-3.14l-8.02-14a2 2 0 00-3.4 0z"/></svg>';
-    } else {
-      alertBox.className += ' bg-yellow-50 border-yellow-200 text-yellow-900';
-      alertIcon.innerHTML = '<svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.02 14A2 2 0 004.02 21h15.96a2 2 0 001.73-3.14l-8.02-14a2 2 0 00-3.4 0z"/></svg>';
-    }
-    alertText.textContent = text;
-  }
+        function setAlert(status, text) {
+            if (!text) {
+                alertWrap.classList.add('hidden');
+                return;
+            }
+            alertWrap.classList.remove('hidden');
+            alertBox.className = 'flex items-start gap-2 p-3 rounded-xl border';
 
-  function renderSessions(sessions) {
-    sessionsWrap.innerHTML = '';
-    if (!sessions || sessions.length === 0) {
-      sessionsWrap.innerHTML = '<div class="p-4 text-sm text-gray-400">ไม่มีงานที่ได้รับมอบหมาย</div>';
-      return;
-    }
+            if (status === 'overdue') {
+                alertBox.className += ' bg-red-50 border-red-200 text-red-900';
+                alertIcon.innerHTML = '<svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.02 14A2 2 0 004.02 21h15.96a2 2 0 001.73-3.14l-8.02-14a2 2 0 00-3.4 0z"/></svg>';
+            } else {
+                alertBox.className += ' bg-yellow-50 border-yellow-200 text-yellow-900';
+                alertIcon.innerHTML = '<svg class="w-5 h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86l-8.02 14A2 2 0 004.02 21h15.96a2 2 0 001.73-3.14l-8.02-14a2 2 0 00-3.4 0z"/></svg>';
+            }
+            alertText.textContent = text;
+        }
 
-    sessions.forEach(s => {
-      const status = s.deadline_status || 'none';
-      const badgeCls =
-        status === 'overdue' ? 'bg-red-100 text-red-700 border-red-200' :
-        status === 'near'    ? 'bg-orange-100 text-orange-800 border-orange-200' :
-        status === 'ok'      ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                               'bg-gray-100 text-gray-600 border-gray-200';
+        function renderSessions(sessions) {
+            sessionsWrap.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                sessionsWrap.innerHTML = '<div class="p-4 text-sm text-gray-400">ไม่มีงานที่ได้รับมอบหมาย</div>';
+                return;
+            }
 
-      const barPct = s.assigned > 0 ? Math.round((s.completed / s.assigned) * 100) : 0;
-      const deadlineText = s.deadline_date ? `Deadline: ${s.deadline_date}` : 'Deadline: ไม่กำหนด';
-      const sub = s.deadline_sub ? ` • ${s.deadline_sub}` : '';
+            sessions.forEach(s => {
+                const status = s.deadline_status || 'none';
+                const badgeCls =
+                    status === 'overdue' ? 'bg-red-100 text-red-700 border-red-200' :
+                    status === 'near' ? 'bg-orange-100 text-orange-800 border-orange-200' :
+                    status === 'ok' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                    status === 'no_pending' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                    'bg-gray-100 text-gray-600 border-gray-200';
 
-      const row = document.createElement('div');
-      row.className = 'p-3 m-2 rounded-xl border hover:bg-gray-50 transition cursor-pointer';
-      row.innerHTML = `
+                const barPct = s.assigned > 0 ? Math.round((s.completed / s.assigned) * 100) : 0;
+                const deadlineText = s.deadline_date ? `Deadline: ${s.deadline_date}` : 'Deadline: ไม่กำหนด';
+                const sub = s.deadline_sub ? ` • ${s.deadline_sub}` : '';
+
+                const row = document.createElement('div');
+                row.className = 'p-3 m-2 rounded-xl border hover:bg-gray-50 transition cursor-pointer';
+                row.innerHTML = `
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="text-sm font-bold text-gray-900 truncate">${escapeHtml(s.session_name || ('Session #' + s.session_id))}</div>
             <div class="text-[11px] text-gray-500">${deadlineText}${sub}</div>
+            <div class="text-[11px] text-gray-600 font-semibold">
+              คะแนน ${typeof s.score === 'number' ? s.score + '%' : '-'} • ค้าง <span class="text-gray-900">${s.pending}</span> / ทั้งหมด ${s.assigned}
+            </div>
           </div>
           <div class="flex flex-col items-end gap-1">
-             <span class="px-2 py-0.5 whitespace-nowrap rounded-full border text-[11px] font-semibold ${badgeCls}">
+           <span class="px-2 py-0.5 whitespace-nowrap rounded-full border text-[11px] font-semibold ${badgeCls}">
   ${labelForStatus(status)}
 </span>
-            <div class="text-[11px] text-gray-600 font-semibold">
-              ค้าง <span class="text-gray-900">${s.pending}</span> / ทั้งหมด ${s.assigned}
-            </div>
           </div>
         </div>
         <div class="mt-2">
@@ -374,45 +397,55 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
           <div class="mt-1 text-[10px] text-gray-400">ความคืบหน้า ${barPct}% (เสร็จ ${s.completed} รายการ)</div>
         </div>
       `;
-      row.addEventListener('click', () => {
-        // ถ้าในอนาคต inventory.php รองรับ filter ด้วย session_id จะใช้งานได้ทันที
-        window.location.href = `inventory.php?session_id=${encodeURIComponent(s.session_id)}&status=pending`;
-      });
-      sessionsWrap.appendChild(row);
-    });
-  }
+                row.addEventListener('click', () => {
+                    // ถ้าในอนาคต inventory.php รองรับ filter ด้วย session_id จะใช้งานได้ทันที
+                    window.location.href = `inventory.php?session_id=${encodeURIComponent(s.session_id)}&status=pending`;
+                });
+                sessionsWrap.appendChild(row);
+            });
+        }
 
-  function labelForStatus(status) {
-    if (status === 'overdue') return 'เกินกำหนด';
-    if (status === 'near') return 'ใกล้ครบกำหนด';
-    if (status === 'ok') return 'ตามกำหนด';
-    return 'ไม่กำหนด';
-  }
+        function labelForStatus(status) {
+            if (status === 'overdue') return 'เกินกำหนด';
+            if (status === 'near') return 'ใกล้ครบกำหนด';
+            if (status === 'ok') return 'ตามกำหนด';
+            if (status === 'no_pending') return 'เสร็จแล้ว';
+            return 'ไม่กำหนด';
+        }
 
-  function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  }
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, m => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            } [m]));
+        }
 
-  async function loadTopbar() {
-    try {
-      const res = await fetch('<?= APP_URL ?>/api/topbar_status.php?action=mine', { credentials: 'include' })
-        .then(r => r.json());
-      if (!res || !res.success) return;
+        async function loadTopbar() {
+            try {
+                const res = await fetch('<?= APP_URL ?>/api/topbar_status.php?action=mine', {
+                        credentials: 'include'
+                    })
+                    .then(r => r.json());
+                if (!res || !res.success) return;
 
-      const d = res.data || {};
-      pendingEl.textContent = (d.total_pending ?? 0).toLocaleString();
-      panelSub.textContent = d.panel_sub || '';
-      setChip(d.overall_status || 'none');
-      setDeadlineChip(d.overall_status || 'none', d.deadline_label || 'Deadline', d.deadline_sub || '');
-      setAlert(d.overall_status || 'none', d.alert_text || '');
-      renderSessions(d.sessions || []);
-    } catch (e) {
-      // เงียบไว้ ไม่ให้รบกวนการใช้งาน
-    }
-  }
+                const d = res.data || {};
+                pendingEl.textContent = (d.total_pending ?? 0).toLocaleString();
+                scoreEl.textContent = (typeof d.score === 'number') ? d.score.toLocaleString() + '%' : '-';
+                panelSub.textContent = d.panel_sub || '';
+                setChip(d.overall_status || 'none');
+                setDeadlineChip(d.overall_status || 'none', d.deadline_label || 'Deadline', d.deadline_sub || '');
+                setAlert(d.overall_status || 'none', d.alert_text || '');
+                renderSessions(d.sessions || []);
+            } catch (e) {
+                // เงียบไว้ ไม่ให้รบกวนการใช้งาน
+            }
+        }
 
-  // initial + refresh every 60s
-  loadTopbar();
-  setInterval(loadTopbar, 60000);
-})();
+        // initial + refresh every 60s
+        loadTopbar();
+        setInterval(loadTopbar, 60000);
+    })();
 </script>

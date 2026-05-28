@@ -7,7 +7,6 @@ requireLogin();
 $db = Database::getInstance();
 
 // ═══ COMPANY INFO ═══
-// ดึงข้อมูลบริษัท (site) จาก sites table
 $companyInfo = $db->fetchOne("
     SELECT s.site_code, s.site_name, s.legal_name, s.tax_id
     FROM sites s
@@ -17,40 +16,78 @@ $companyInfo = $db->fetchOne("
 $companyName = $companyInfo['site_name'] ?? 'Asset Management System';
 
 // ═══ AUDIT YEAR FILTER ═══
-// ดึงรายชื่อปีการตรวจนับจาก audit_sessions.session_year
 $auditYears = $db->fetchAll("
-    SELECT DISTINCT session_year 
-    FROM audit_sessions 
-    WHERE session_year IS NOT NULL 
+    SELECT DISTINCT session_year
+    FROM audit_sessions
+    WHERE session_year IS NOT NULL
     ORDER BY session_year DESC
 ");
-// ปี default: ใช้ปี session ล่าสุด หรือปีปัจจุบัน
 $selectedYear = intval($_GET['audit_year'] ?? (empty($auditYears) ? date('Y') : $auditYears[0]['session_year']));
 
-// ═══ SUMMARY STATS ═══
-// นับทรัพย์สินทั้งหมด (ไม่กรองปี เพราะเป็นข้อมูลรวม)
-$totalAssets  = $db->fetchOne("SELECT COUNT(*) as c FROM assets")['c'];
-$activeAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status='active'")['c'];
-// นับสถานะอื่นๆ (ไม่ใช่ active): returned, not_found, inactive, repairing
-$inactiveAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE status IN ('returned','not_found','inactive','repairing')")['c'];
-$totalValue   = $db->fetchOne("SELECT SUM(acquis_val) as v FROM assets WHERE status='active'")['v'] ?? 0;
+$dashYearFilterSql = " AND s.session_year = ? ";
+$dashYearParams = [$selectedYear];
 
-// ═══ MONTHLY ACQUISITION DATA (ทรัพย์สินที่ซื้อรายเดือน) ═══
-// ดึงข้อมูลทรัพย์สินที่ซื้อในแต่ละเดือน กรองตามปีการตรวจนับที่เลือก
-// ใช้ cap_date (วันที่ซื้อ) เป็นเกณฑ์ และกรองเฉพาะปี
+// ═══ 📊 LOGIC ตรวจสอบยอดต่าง ASSETS กับ AUDIT ASSIGNMENT (เพิ่มเข้ามาใหม่) ═══
+// 1. นับจำนวนทรัพย์สินทั้งหมดที่มีอยู่ใน Master Data ปัจจุบัน (ที่มีสถานะ Active)
+$masterTotalAssets = $db->fetchOne("SELECT COUNT(*) as c FROM assets WHERE 1=1")['c']; // status = 'active'
+
+// 2. นับจำนวนทรัพย์สินที่ถูกนำเข้าสู่รอบตรวจนับของปีปัจจุบันแล้ว
+$assignedInSession = $db->fetchOne("
+    SELECT COUNT(DISTINCT aa.asset_id) as c
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE s.session_year = ?
+", [$selectedYear])['c'];
+
+// 3. คำนวณส่วนต่าง (จำนวนทรัพย์สินใหม่ที่ยังไม่ถูกมอบหมายงานตรวจนับ)
+$missingAssetCount = max(0, $masterTotalAssets - $assignedInSession);
+
+
+// ═══ SUMMARY STATS (สถิติตามรอบตรวจนับปีนี้) ═══
+$totalAssets  = $db->fetchOne("
+    SELECT COUNT(DISTINCT aa.asset_id) as c
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE 1=1" . $dashYearFilterSql, $dashYearParams)['c'];
+
+$activeAssets = $db->fetchOne("
+    SELECT COUNT(DISTINCT aa.asset_id) as c
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql, $dashYearParams)['c'];
+
+$inactiveAssets = $db->fetchOne("
+    SELECT COUNT(DISTINCT aa.asset_id) as c
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE aa.status='completed' AND (
+        IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' OR
+        IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"not_found\"%' OR
+        IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' OR
+        IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%'
+    )" . $dashYearFilterSql, $dashYearParams)['c'];
+
+$totalValue   = $db->fetchOne("
+    SELECT SUM(a.acquis_val) as v
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%'" . $dashYearFilterSql, $dashYearParams)['v'] ?? 0;
+
+// ═══ MONTHLY ACQUISITION DATA ═══
 $monthlyData = $db->fetchAll("
-    SELECT 
+    SELECT
         DATE_FORMAT(cap_date, '%Y-%m') as month,
         COUNT(*) as cnt,
         SUM(acquis_val) as val
-    FROM assets 
-    WHERE cap_date IS NOT NULL 
+    FROM assets
+    WHERE cap_date IS NOT NULL
     AND YEAR(cap_date) = ?
     GROUP BY MONTH(cap_date), YEAR(cap_date)
     ORDER BY cap_date ASC
 ", [$selectedYear]);
 
-// Inventory progress (audit session progress)
+// Inventory progress
 $session = $db->fetchOne("SELECT * FROM audit_sessions ORDER BY id DESC LIMIT 1");
 $invTotal    = 0;
 $invChecked  = 0;
@@ -61,70 +98,134 @@ if ($session) {
     $invPct     = $invTotal > 0 ? round($invChecked / $invTotal * 100) : 0;
 }
 
-// ═══ BY STATUS (Donut Chart) ═══
-// นับจำนวนทรัพย์สินตามสถานะ
-$statusData = $db->fetchAll("SELECT status, COUNT(*) as cnt FROM assets GROUP BY status");
+// ═══ BY STATUS ═══
+$statusCountsRaw = $db->fetchAll("
+    SELECT
+        CASE
+            WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 'active'
+            WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' THEN 'returned'
+            WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"not_found\"%' THEN 'not_found'
+            WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 'inactive'
+            WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%' THEN 'repairing'
+            ELSE 'unknown'
+        END as status_key,
+        COUNT(DISTINCT aa.asset_id) as cnt
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE aa.status = 'completed'" . $dashYearFilterSql . "
+    GROUP BY status_key
+", $dashYearParams);
 
-// ═══ BY DEPARTMENT (Top 6) ═══
-// ดึง 6 แผนกที่มีทรัพย์สินมากที่สุด
-$deptData = $db->fetchAll("SELECT department_name, COUNT(*) as cnt FROM assets GROUP BY department_name ORDER BY cnt DESC LIMIT 6");
+$statusData = [];
+foreach ($statusCountsRaw as $r) {
+    if ($r['status_key'] !== 'unknown') {
+        $statusData[] = ['status' => $r['status_key'], 'cnt' => $r['cnt']];
+    }
+}
+
+// ═══ BY DEPARTMENT ═══
+$deptData = $db->fetchAll("
+    SELECT a.department_name, COUNT(DISTINCT aa.asset_id) as cnt
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE 1=1" . $dashYearFilterSql . "
+    GROUP BY a.department_name
+    ORDER BY cnt DESC LIMIT 6
+", $dashYearParams);
 
 // ═══ BY CLASS ═══
-// ดึงจำนวนทรัพย์สินตามประเภท
-$classData = $db->fetchAll("SELECT c.class_name, COUNT(a.id) as cnt FROM assets a LEFT JOIN asset_classes c ON a.class_code = c.class_code GROUP BY a.class_code ORDER BY cnt DESC");
+$classData = $db->fetchAll("
+    SELECT c.class_name, COUNT(DISTINCT aa.asset_id) as cnt
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    LEFT JOIN asset_classes c ON a.class_code = c.class_code
+    WHERE 1=1" . $dashYearFilterSql . "
+    GROUP BY a.class_code
+    ORDER BY cnt DESC
+", $dashYearParams);
 
 // Recent assets
 $recentPage  = max(1, intval($_GET['rpage'] ?? 1));
 $recentLimit = 8;
 $recentOffset = ($recentPage - 1) * $recentLimit;
-$recentTotal = $db->fetchOne("SELECT COUNT(*) as c FROM assets")['c'];
-$recentPages = max(1, ceil($recentTotal / $recentLimit));
-$recentAssets = $db->fetchAll("SELECT * FROM assets ORDER BY created_at DESC LIMIT $recentLimit OFFSET $recentOffset");
 
-// ── Plant tab data ──────────────────────────────────────────────────────
+$recentTotal = $db->fetchOne("
+    SELECT COUNT(DISTINCT aa.asset_id) as c
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    WHERE 1=1" . $dashYearFilterSql, $dashYearParams)['c'];
+
+$recentPages = max(1, ceil($recentTotal / $recentLimit));
+
+$recentAssets = $db->fetchAll("
+    SELECT a.* FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE 1=1" . $dashYearFilterSql . "
+    ORDER BY aa.id DESC LIMIT $recentLimit OFFSET $recentOffset
+", $dashYearParams);
+
+// ── Plant tab data ──
 $plantStats = $db->fetchAll("
     SELECT a.plant_code,
            COALESCE(p.plant_name, a.plant_code) AS plant_name,
-           COUNT(*)                                                              AS total,
-           SUM(CASE WHEN a.status = 'active'    THEN 1 ELSE 0 END)             AS active_count,
-           SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END)             AS cancelled_count,
-           SUM(CASE WHEN a.status NOT IN ('active','cancelled') THEN 1 ELSE 0 END) AS other_count,
-           SUM(CASE WHEN a.status = 'active' THEN COALESCE(a.acquis_val,0) ELSE 0 END) AS total_value
-    FROM assets a
+           COUNT(DISTINCT aa.asset_id)                                         AS total,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS cancelled_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"active\"%' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS other_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN COALESCE(a.acquis_val,0) ELSE 0 END) AS total_value
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
     LEFT JOIN plants p ON a.plant_code = p.plant_code
-    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . "
     GROUP BY a.plant_code, p.plant_name
     ORDER BY a.plant_code
-");
+", $dashYearParams);
 
-// Cost-center breakdown per plant
 $ccRaw = $db->fetchAll("
-    SELECT plant_code, cost_center,
-           COUNT(*) AS total,
-           SUM(CASE WHEN status = 'active'    THEN 1 ELSE 0 END) AS active_count,
-           SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
-           SUM(CASE WHEN status NOT IN ('active','cancelled') THEN 1 ELSE 0 END) AS other_count,
-           SUM(CASE WHEN status = 'active' THEN COALESCE(acquis_val,0) ELSE 0 END) AS value_sum
-    FROM assets
-    WHERE plant_code IS NOT NULL AND plant_code != ''
-    GROUP BY plant_code, cost_center
-    ORDER BY plant_code, total DESC
-");
+    SELECT a.plant_code, a.cost_center,
+           COUNT(DISTINCT aa.asset_id) AS total,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 1 ELSE 0 END) AS active_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS cancelled_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"active\"%' AND IFNULL(aa.remark, '') NOT LIKE '%\"check_result\"%\"inactive\"%' THEN 1 ELSE 0 END) AS other_count,
+           SUM(CASE WHEN aa.status='completed' AND IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN COALESCE(a.acquis_val,0) ELSE 0 END) AS value_sum
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . "
+    GROUP BY a.plant_code, a.cost_center
+    ORDER BY a.plant_code, total DESC
+", $dashYearParams);
 $ccByPlant = [];
 foreach ($ccRaw as $cc) {
     $ccByPlant[$cc['plant_code']][] = $cc;
 }
 
-// Status per plant (for mini donut)
 $statusByPlantRaw = $db->fetchAll("
-    SELECT plant_code, status, COUNT(*) AS cnt
-    FROM assets
-    WHERE plant_code IS NOT NULL AND plant_code != ''
-    GROUP BY plant_code, status
-");
+    SELECT a.plant_code,
+           CASE
+               WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"active\"%' THEN 'active'
+               WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"returned\"%' THEN 'returned'
+               WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"not_found\"%' THEN 'not_found'
+               WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"inactive\"%' THEN 'inactive'
+               WHEN IFNULL(aa.remark, '') LIKE '%\"check_result\"%\"repairing\"%' THEN 'repairing'
+               ELSE 'unknown'
+           END as res_status,
+           COUNT(DISTINCT aa.asset_id) AS cnt
+    FROM audit_assignments aa
+    INNER JOIN audit_sessions s ON aa.session_id = s.id
+    INNER JOIN assets a ON aa.asset_id = a.id
+    WHERE a.plant_code IS NOT NULL AND a.plant_code != ''" . $dashYearFilterSql . "
+    GROUP BY a.plant_code, res_status
+", $dashYearParams);
 $statusByPlant = [];
 foreach ($statusByPlantRaw as $r) {
-    $statusByPlant[$r['plant_code']][$r['status']] = (int)$r['cnt'];
+    if ($r['res_status'] !== 'unknown') {
+        $statusByPlant[$r['plant_code']][$r['res_status']] = (int)$r['cnt'];
+    }
 }
 ?>
 <?php include __DIR__ . '/../components/head.php'; ?>
@@ -133,7 +234,6 @@ foreach ($statusByPlantRaw as $r) {
     <?php include __DIR__ . '/../components/sidebar.php'; ?>
 
     <main class="main-content flex-1 p-4 sm:p-6">
-        <!-- ═══ HEADER: ชื่อบริษัท และ FILTER ═══ -->
         <div class="mb-6">
             <div class="flex items-center justify-between">
                 <div>
@@ -141,8 +241,7 @@ foreach ($statusByPlantRaw as $r) {
                     <h1 class="text-xl font-bold text-gray-900"><?= htmlspecialchars($companyName) ?></h1>
                     <p class="text-sm text-gray-500 mt-0.5">ภาพรวมทรัพย์สินทั้งหมด</p>
                 </div>
-                
-                <!-- AUDIT YEAR SELECTOR (มุมขวา) -->
+
                 <div class="flex items-end gap-3">
                     <div>
                         <label for="auditYearSelect" class="block text-xs font-semibold text-gray-600 mb-1.5">ปีการตรวจนับ</label>
@@ -161,7 +260,38 @@ foreach ($statusByPlantRaw as $r) {
             </div>
         </div>
 
-        <!-- ═══ Plant Tabs ═══ -->
+        <div class="mb-6 p-4 rounded-xl border <?= $missingAssetCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-green-50 border-green-200 text-green-900' ?>">
+            <div class="flex items-start gap-3">
+                <div class="mt-0.5">
+                    <?php if ($missingAssetCount > 0): ?>
+                        <i class="fas fa-exclamation-triangle text-amber-500 text-lg"></i>
+                    <?php else: ?>
+                        <i class="fas fa-check-circle text-green-500 text-lg"></i>
+                    <?php endif; ?>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-bold text-sm">💡 ตรวจสอบความสอดคล้องของข้อมูลประจำเดือน</h3>
+                    <p class="text-xs mt-1 text-gray-600 leading-relaxed">
+                        ปัจจุบันมีทรัพย์สิน (Active) ใน Master Data ทั้งหมด <span class="font-bold text-gray-900"><?= number_format($masterTotalAssets) ?></span> รายการ
+                        | ถูกดึงเข้าสู่รอบตรวจนับปี <?= $selectedYear ?> แล้ว <span class="font-bold text-gray-900"><?= number_format($assignedInSession) ?></span> รายการ
+                    </p>
+
+                    <?php if ($missingAssetCount > 0): ?>
+                        <div class="mt-3 flex items-center justify-between bg-white/60 p-2.5 rounded-lg border border-amber-200/50 flex-wrap gap-2">
+                            <span class="text-xs font-medium text-amber-800">
+                                <i class="fas fa-sync-alt animate-spin mr-1"></i> พบทรัพย์สินใหม่ตกหล่นอยู่ <span class="font-bold text-red-600 underline text-sm"><?= number_format($missingAssetCount) ?></span> รายการ ที่ยังไม่ถูกส่งไปรับการตรวจนับในปีนี้!
+                            </span>
+                            <span class="text-[11px] bg-amber-600 text-white px-2.5 py-1 rounded-md font-semibold opacity-90">ต้องการเอาทรัพย์สินใหม่เข้าตรวจนับประจำเดือน</span>
+                        </div>
+                    <?php else: ?>
+                        <p class="text-xs mt-1.5 text-green-700 font-medium">
+                            <i class="fas fa-star mr-1"></i> ยอดเยี่ยม! รายการทรัพย์สินในระบบและรอบตรวจนับตรงกันครบถ้วนสมบูรณ์แล้ว
+                        </p>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
         <div class="mb-5 border-b border-gray-200">
             <nav class="flex overflow-x-auto gap-0.5 -mb-px no-scrollbar">
                 <button onclick="switchPlantTab('all')" id="tab-all"
@@ -179,14 +309,12 @@ foreach ($statusByPlantRaw as $r) {
             </nav>
         </div>
 
-        <!-- ═══ TAB: ทั้งหมด ═══ -->
         <div id="content-all">
 
-        <!-- Stat Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <div class="stat-card">
                 <div class="flex items-center justify-between mb-3">
-                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ทรัพย์สินทั้งหมด</p>
+                    <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">ทรัพย์สินในรอบปีนี้</p>
                     <div class="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
                         <i class="fas fa-cubes text-blue-600 text-sm"></i>
                     </div>
@@ -229,7 +357,6 @@ foreach ($statusByPlantRaw as $r) {
             </div>
         </div>
 
-        <!-- Inventory Progress -->
         <?php if ($session): ?>
         <div class="card p-5 mb-6">
             <div class="flex items-center justify-between mb-3">
@@ -252,31 +379,25 @@ foreach ($statusByPlantRaw as $r) {
         </div>
         <?php endif; ?>
 
-        <!-- ═══ MONTHLY ACQUISITION CHART (ทรัพย์สินที่ซื้อรายเดือน) ═══ -->
         <div class="card p-5 mb-6">
             <h2 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินที่ซื้อรายเดือน (ปี <?= htmlspecialchars($selectedYear) ?>)</h2>
             <div id="chartMonthly" class="min-h-[220px]"></div>
         </div>
 
-        <!-- Charts Row -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-            <!-- Bar Chart: By Department -->
             <div class="card p-5 lg:col-span-2">
                 <h2 class="font-bold text-gray-900 text-sm mb-4">ทรัพย์สินตามแผนก (Top 6)</h2>
                 <div id="chartDept" class="min-h-[220px]"></div>
             </div>
-
-            <!-- Donut: By Status -->
             <div class="card p-5">
                 <h2 class="font-bold text-gray-900 text-sm mb-4">สถานะทรัพย์สิน</h2>
                 <div id="chartStatus" class="min-h-[220px]"></div>
             </div>
         </div>
 
-        <!-- Recent Assets Table -->
         <div class="card">
             <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                <h2 class="font-bold text-gray-900 text-sm">ทรัพย์สินล่าสุด</h2>
+                <h2 class="font-bold text-gray-900 text-sm">ทรัพย์สินล่าสุดในรอบปีนี้</h2>
                 <a href="asset-list.php" class="text-xs text-blue-600 hover:underline font-medium">ดูทั้งหมด →</a>
             </div>
             <div class="table-wrap">
@@ -303,23 +424,8 @@ foreach ($statusByPlantRaw as $r) {
                             <td class="text-sm font-medium text-gray-700"><?= number_format($a['acquis_val'], 2) ?></td>
                             <td>
                                 <?php
-                                // ─── Status label (สถานะทรัพย์สิน) ───
-                                // ใช้สีเดียวกับ Chart: Status
-                                $slabel = [
-                                    'active'=>'ใช้งาน',
-                                    'returned'=>'ชำรุด-ส่งคืน',
-                                    'not_found'=>'ไม่พบ',
-                                    'inactive'=>'ไม่ใช้งาน',
-                                    'repairing'=>'ชำรุด-รอซ่อม',
-                                ];
-                                // Status color (สัดส่วนเดียวกับ statusColors ในลาด chart)
-                                $scolor = [
-                                    'active'=>'#16a34a',      // green
-                                    'returned'=>'#2563eb',    // blue
-                                    'not_found'=>'#dc2626',   // red
-                                    'inactive'=>'#9ca3af',    // gray
-                                    'repairing'=>'#f59e0b',   // amber
-                                ];
+                                $slabel = ['active'=>'ใช้งาน', 'returned'=>'ชำรุด-ส่งคืน', 'not_found'=>'ไม่พบ', 'inactive'=>'ไม่ใช้งาน', 'repairing'=>'ชำรุด-รอซ่อม'];
+                                $scolor = ['active'=>'#16a34a', 'returned'=>'#2563eb', 'not_found'=>'#dc2626', 'inactive'=>'#9ca3af', 'repairing'=>'#f59e0b'];
                                 $status = $a['status'] ?? 'active';
                                 $color  = $scolor[$status] ?? '#9ca3af';
                                 ?>
@@ -332,7 +438,7 @@ foreach ($statusByPlantRaw as $r) {
                     </tbody>
                 </table>
             </div>
-        <!-- Recent Pagination -->
+
             <?php if ($recentPages > 1): ?>
             <div class="flex items-center justify-between px-5 py-3 border-t border-gray-100">
                 <p class="text-xs text-gray-500"><?= $recentOffset + 1 ?>–<?= min($recentOffset + $recentLimit, $recentTotal) ?> จาก <?= number_format($recentTotal) ?></p>
@@ -351,10 +457,7 @@ foreach ($statusByPlantRaw as $r) {
             <?php endif; ?>
         </div>
 
-        </div><!-- /#content-all -->
-
-        <!-- ═══ TAB: Per Plant ═══ -->
-        <?php foreach ($plantStats as $ps):
+        </div><?php foreach ($plantStats as $ps):
             $pCode = $ps['plant_code'];
             $pCCs  = $ccByPlant[$pCode] ?? [];
             $pStat = $statusByPlant[$pCode] ?? [];
@@ -364,7 +467,6 @@ foreach ($statusByPlantRaw as $r) {
         ?>
         <div id="content-<?= htmlspecialchars($pCode, ENT_QUOTES) ?>" class="hidden">
 
-            <!-- Plant header -->
             <div class="flex items-center justify-between mb-4">
                 <div>
                     <h2 class="text-base font-bold text-gray-900">
@@ -377,7 +479,6 @@ foreach ($statusByPlantRaw as $r) {
                 <a href="asset-list.php?plant=<?= urlencode($pCode) ?>" class="text-xs text-blue-600 hover:underline font-medium">ดูรายการทั้งหมด →</a>
             </div>
 
-            <!-- Plant stat cards -->
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
                 <div class="stat-card">
                     <div class="flex items-center justify-between mb-2">
@@ -421,7 +522,6 @@ foreach ($statusByPlantRaw as $r) {
                 </div>
             </div>
 
-            <!-- Status progress bar -->
             <?php if ($pTotal > 0): ?>
             <div class="card p-4 mb-5">
                 <h3 class="text-xs font-bold text-gray-700 mb-3 flex items-center gap-2">
@@ -443,7 +543,6 @@ foreach ($statusByPlantRaw as $r) {
                 <div class="flex flex-wrap gap-x-4 gap-y-1">
                     <?php foreach ($pStat as $st => $cnt):
                         $pct = round($cnt / $pTotal * 100);
-                        $dotColor = str_replace('bg-','bg-', $statColors[$st] ?? 'bg-gray-400');
                     ?>
                     <div class="flex items-center gap-1.5 text-xs text-gray-600">
                         <span class="w-2.5 h-2.5 rounded-full <?= $statColors[$st] ?? 'bg-gray-300' ?>"></span>
@@ -456,13 +555,11 @@ foreach ($statusByPlantRaw as $r) {
             </div>
             <?php endif; ?>
 
-            <!-- Cost Center breakdown table -->
             <?php if (!empty($pCCs)): ?>
             <div class="card">
                 <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                     <h3 class="text-xs font-bold text-gray-700 flex items-center gap-2">
-                        <i class="fas fa-table text-gray-400"></i>
-                        Cost Center ใน <?= htmlspecialchars($pCode) ?>
+                        <i class="fas fa-table text-gray-400"></i> Cost Center ใน <?= htmlspecialchars($pCode) ?>
                     </h3>
                     <span class="text-xs text-gray-400"><?= count($pCCs) ?> CC</span>
                 </div>
@@ -510,25 +607,20 @@ foreach ($statusByPlantRaw as $r) {
             <div class="card px-5 py-8 text-center text-sm text-gray-400">ไม่พบข้อมูล Cost Center</div>
             <?php endif; ?>
 
-        </div><!-- /#content-{plant} -->
+        </div>
         <?php endforeach; ?>
     </main>
 </div>
 
 <div id="toast-container"></div>
-
 <script src="<?= APP_URL ?>/assets/js/app.js"></script>
 <script>
-// ── Tab switching ─────────────────────────────────────────────────────────────
 function switchPlantTab(tabId) {
-    // Hide all content panels
     document.querySelectorAll('[id^="content-"]').forEach(el => el.classList.add('hidden'));
-    // Reset all tab styles
     document.querySelectorAll('.plant-tab').forEach(btn => {
         btn.classList.remove('border-blue-600', 'text-blue-700', 'bg-blue-50/50');
         btn.classList.add('border-transparent', 'text-gray-500');
     });
-    // Show selected
     const target = document.getElementById('content-' + tabId);
     if (target) target.classList.remove('hidden');
     const activeBtn = document.getElementById('tab-' + tabId);
@@ -538,7 +630,7 @@ function switchPlantTab(tabId) {
     }
 }
 
-// ─── Chart: Department ───────────────────────────────────────────────────────
+// Chart: Department
 const deptLabels = <?= json_encode(array_column($deptData, 'department_name')) ?>;
 const deptCounts = <?= json_encode(array_map('intval', array_column($deptData, 'cnt'))) ?>;
 
@@ -554,23 +646,10 @@ new ApexCharts(document.getElementById('chartDept'), {
     tooltip: { y: { formatter: v => v + ' รายการ' } }
 }).render();
 
-// ─── Chart: Status ───────────────────────────────────────────────────────────
-// สถานะที่มีอยู่จริงในฐานข้อมูล: active, returned, not_found, inactive, repairing
+// Chart: Status
 const statusRaw = <?= json_encode($statusData) ?>;
-const statusLabels = { 
-    active:'ใช้งาน', 
-    returned:'ชำรุด-ส่งคืน', 
-    not_found:'ไม่พบ', 
-    inactive:'ไม่ใช้งาน', 
-    repairing:'ชำรุด-รอซ่อม' 
-};
-const statusColors = { 
-    active:'#16a34a', 
-    returned:'#2563eb', 
-    not_found:'#dc2626', 
-    inactive:'#9ca3af', 
-    repairing:'#f59e0b' 
-};
+const statusLabels = { active:'ใช้งาน', returned:'ชำรุด-ส่งคืน', not_found:'ไม่พบ', inactive:'ไม่ใช้งาน', repairing:'ชำรุด-รอซ่อม' };
+const statusColors = { active:'#16a34a', returned:'#2563eb', not_found:'#dc2626', inactive:'#9ca3af', repairing:'#f59e0b' };
 
 new ApexCharts(document.getElementById('chartStatus'), {
     chart: { type: 'donut', height: 220, fontFamily: 'IBM Plex Sans Thai, sans-serif' },
@@ -583,51 +662,23 @@ new ApexCharts(document.getElementById('chartStatus'), {
     stroke: { width: 2 }
 }).render();
 
-// ═══ Chart: Monthly Acquisition (ทรัพย์สินที่ซื้อรายเดือน) ═══
-// ข้อมูลจำนวนและมูลค่าทรัพย์สินที่ซื้อในแต่ละเดือน
-// กรองตามปีการตรวจนับที่เลือก
+// Chart: Monthly Acquisition
 const monthlyRaw = <?= json_encode($monthlyData) ?>;
-const monthlyLabels = monthlyRaw.map(m => m.month); // รูปแบบ: YYYY-MM
-const monthlyCounts = monthlyRaw.map(m => parseInt(m.cnt)); // จำนวนรายการ
-const monthlyValues = monthlyRaw.map(m => parseFloat(m.val) || 0); // มูลค่ารวม (บาท)
+const monthlyLabels = monthlyRaw.map(m => m.month);
+const monthlyCounts = monthlyRaw.map(m => parseInt(m.cnt));
+const monthlyValues = monthlyRaw.map(m => parseFloat(m.val) || 0);
 
 new ApexCharts(document.getElementById('chartMonthly'), {
-    chart: { 
-        type: 'area', 
-        height: 220, 
-        toolbar: { show: false }, 
-        fontFamily: 'IBM Plex Sans Thai, sans-serif',
-        sparkline: { enabled: false }
-    },
-    series: [{ 
-        name: 'จำนวนทรัพย์สิน', 
-        data: monthlyCounts 
-    }],
-    xaxis: { 
-        categories: monthlyLabels, 
-        labels: { style: { fontSize: '11px', colors: '#64748b' } },
-        tooltip: { enabled: false }
-    },
-    yaxis: {
-        labels: { style: { fontSize: '11px', colors: '#64748b' } }
-    },
+    chart: { type: 'area', height: 220, toolbar: { show: false }, fontFamily: 'IBM Plex Sans Thai, sans-serif' },
+    series: [{ name: 'จำนวนทรัพย์สิน', data: monthlyCounts }],
+    xaxis: { categories: monthlyLabels, labels: { style: { fontSize: '11px', colors: '#64748b' } } },
     colors: ['#2563eb'],
-    fill: { 
-        type: 'gradient', 
-        gradient: { 
-            shadeIntensity: 1, 
-            opacityFrom: 0.35, 
-            opacityTo: 0.05 
-        } 
-    },
+    fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.35, opacityTo: 0.05 } },
     stroke: { curve: 'smooth', width: 2 },
     grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
     dataLabels: { enabled: false },
-    tooltip: { 
-        y: { 
-            formatter: v => v + ' รายการ',
-            title: { formatter: () => '' }
-        },
+    tooltip: {
+        y: { formatter: v => v + ' รายการ', title: { formatter: () => '' } },
         custom: ({ series, seriesIndex, dataPointIndex, w }) => {
             const cnt = series[0]?.[dataPointIndex] || 0;
             const val = monthlyValues[dataPointIndex] || 0;
@@ -641,14 +692,11 @@ new ApexCharts(document.getElementById('chartMonthly'), {
     }
 }).render();
 
-// ═══ FUNCTION: Change Audit Year ═══
-// เปลี่ยนปีการตรวจนับและ reload page พร้อม parameter
 function changeAuditYear(year) {
     const url = new URL(window.location);
     url.searchParams.set('audit_year', year);
     window.location = url.toString();
 }
 </script>
-
 </body>
 </html>

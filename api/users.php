@@ -50,7 +50,7 @@ switch ($action) {
 
     case 'update':
         $me = currentUser();
-        $params = [$input['full_name'], $input['plant_code'], $input['email']];
+        $params = [$input['full_name'], $input['plant_code'], $input['email'], $input['site_id']];
         $roleAndStatusSql = "";
 
         // ป้องกันการเปลี่ยนสิทธิ์หรือสถานะตัวเอง
@@ -66,8 +66,10 @@ switch ($action) {
             $params[] = password_hash($input['password'], PASSWORD_DEFAULT);
         }
 
+
+
         $params[] = $input['id'];
-        $sql = "UPDATE users SET full_name = ?, plant_code = ?, email = ? $roleAndStatusSql $passwordSql WHERE id = ?";
+        $sql = "UPDATE users SET full_name = ?, plant_code = ?, email = ?, site_id = ? $roleAndStatusSql $passwordSql WHERE id = ?";
 
         $res = $db->query($sql, $params);
         echo json_encode(['success' => $res]);
